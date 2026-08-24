@@ -158,7 +158,7 @@ if ($rows === array()) {
 				$authorizationLabel = $prm->hasActiveAuthorization() ? $langs->trans('LmdbEnedisAuthorizationActive') : ($prm->authorization_reference !== '' ? $langs->trans('LmdbEnedisAuthorizationExpiredStatus') : $langs->trans('LmdbEnedisAuthorizationRequiredStatus'));
 				print '<td><span class="badge '.$authorizationClass.'">'.dol_escape_htmltag($authorizationLabel).'</span></td>';
 			} elseif ($field === 't.last_sync_at') {
-				print '<td>'.(!empty($row->last_sync_at) ? dol_print_date($row->last_sync_at, 'dayhour') : '').'</td>';
+				print '<td>'.(!empty($row->last_sync_at) ? dol_print_date($db->jdate((string) $row->last_sync_at), 'dayhour') : '').'</td>';
 			} else {
 				$statusClass = (string) $row->last_sync_status === 'success' ? 'badge-status4' : ((string) $row->last_sync_status === 'error' ? 'badge-status8' : 'badge-status0');
 				$statusLabel = (string) $row->last_sync_status === 'success' ? $langs->trans('LmdbEnedisSyncStatusSuccess') : ((string) $row->last_sync_status === 'error' ? $langs->trans('LmdbEnedisSyncStatusError') : (string) $row->last_sync_status);

@@ -241,8 +241,8 @@ class LmdbEnedisAuthorization
 			$this->db->rollback();
 			return array('success' => false, 'prm_id' => 0, 'result' => 'already_processed');
 		}
-		$expiresAt = strtotime((string) $request->expires_at.' UTC');
-		if ($expiresAt === false || $expiresAt < dol_now()) {
+		$expiresAt = $this->db->jdate((string) $request->expires_at);
+		if ($expiresAt <= 0 || $expiresAt < dol_now()) {
 			$this->setRequestFailure((int) $request->rowid, self::STATUS_EXPIRED, 'expired');
 			$this->db->commit();
 			return array('success' => false, 'prm_id' => 0, 'result' => 'expired');
@@ -314,7 +314,7 @@ class LmdbEnedisAuthorization
 	/**
 	 * @param int $prmId PRM ID
 	 * @param int $entity Entity ID
-	 * @return array{status:string,date_creation:string,error_code:string}|array{}
+	 * @return array{status:string,date_creation:int,error_code:string}|array{}
 	 */
 	public function getLatestRequest($prmId, $entity)
 	{
@@ -334,14 +334,14 @@ class LmdbEnedisAuthorization
 		}
 
 		$status = (string) $row->status;
-		$expiresAt = strtotime((string) $row->expires_at.' UTC');
-		if ($status === self::STATUS_PENDING && $expiresAt !== false && $expiresAt < dol_now()) {
+		$expiresAt = $this->db->jdate((string) $row->expires_at);
+		if ($status === self::STATUS_PENDING && $expiresAt > 0 && $expiresAt < dol_now()) {
 			$status = self::STATUS_EXPIRED;
 		}
 
 		return array(
 			'status' => $status,
-			'date_creation' => (string) $row->date_creation,
+			'date_creation' => !empty($row->date_creation) ? $this->db->jdate((string) $row->date_creation) : 0,
 			'error_code' => (string) $row->error_code,
 		);
 	}

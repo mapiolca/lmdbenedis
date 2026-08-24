@@ -147,8 +147,65 @@ class modLmdbEnedis extends DolibarrModules
 		if ($result < 0) {
 			return -1;
 		}
+		if ($this->ensureDatabaseIndexes() < 0) {
+			return -1;
+		}
 
 		return $this->_init($sql, $options);
+	}
+
+	/**
+	 * Install missing indexes without emitting duplicate-key errors on reactivation.
+	 *
+	 * @return int 1 on success, -1 on error
+	 */
+	private function ensureDatabaseIndexes()
+	{
+		/** @var array<int,array{table:string,name:string,columns:string,unique:bool}> $indexes */
+		$indexes = array(
+			array('table' => 'lmdbenedis_authorization_request', 'name' => 'uk_lmdbenedis_authreq_state', 'columns' => 'state_hash', 'unique' => true),
+			array('table' => 'lmdbenedis_authorization_request', 'name' => 'idx_lmdbenedis_authreq_entity', 'columns' => 'entity', 'unique' => false),
+			array('table' => 'lmdbenedis_authorization_request', 'name' => 'idx_lmdbenedis_authreq_prm', 'columns' => 'fk_prm', 'unique' => false),
+			array('table' => 'lmdbenedis_authorization_request', 'name' => 'idx_lmdbenedis_authreq_status', 'columns' => 'entity, status, expires_at', 'unique' => false),
+			array('table' => 'lmdbenedis_measure', 'name' => 'uk_lmdbenedis_measure_stable', 'columns' => 'entity, fk_prm, resource_code, data_key', 'unique' => true),
+			array('table' => 'lmdbenedis_measure', 'name' => 'idx_lmdbenedis_measure_entity', 'columns' => 'entity', 'unique' => false),
+			array('table' => 'lmdbenedis_measure', 'name' => 'idx_lmdbenedis_measure_prm', 'columns' => 'fk_prm', 'unique' => false),
+			array('table' => 'lmdbenedis_measure', 'name' => 'idx_lmdbenedis_measure_resource_date', 'columns' => 'resource_code, measure_date', 'unique' => false),
+			array('table' => 'lmdbenedis_measure', 'name' => 'idx_lmdbenedis_measure_prm_date', 'columns' => 'fk_prm, measure_date', 'unique' => false),
+			array('table' => 'lmdbenedis_prm', 'name' => 'uk_lmdbenedis_prm_entity_usagepoint', 'columns' => 'entity, usage_point_id', 'unique' => true),
+			array('table' => 'lmdbenedis_prm', 'name' => 'idx_lmdbenedis_prm_entity', 'columns' => 'entity', 'unique' => false),
+			array('table' => 'lmdbenedis_prm', 'name' => 'idx_lmdbenedis_prm_soc', 'columns' => 'fk_soc', 'unique' => false),
+			array('table' => 'lmdbenedis_prm', 'name' => 'idx_lmdbenedis_prm_powerplant', 'columns' => 'fk_powerplant', 'unique' => false),
+			array('table' => 'lmdbenedis_prm', 'name' => 'idx_lmdbenedis_prm_status', 'columns' => 'status', 'unique' => false),
+			array('table' => 'lmdbenedis_prm_stream', 'name' => 'uk_lmdbenedis_prm_stream', 'columns' => 'entity, fk_prm, resource_code', 'unique' => true),
+			array('table' => 'lmdbenedis_prm_stream', 'name' => 'idx_lmdbenedis_prm_stream_entity', 'columns' => 'entity', 'unique' => false),
+			array('table' => 'lmdbenedis_prm_stream', 'name' => 'idx_lmdbenedis_prm_stream_prm', 'columns' => 'fk_prm', 'unique' => false),
+			array('table' => 'lmdbenedis_prm_stream', 'name' => 'idx_lmdbenedis_prm_stream_active', 'columns' => 'active', 'unique' => false),
+			array('table' => 'lmdbenedis_prm_stream', 'name' => 'idx_lmdbenedis_prm_stream_cursor', 'columns' => 'cursor_date', 'unique' => false),
+		);
+
+		foreach ($indexes as $index) {
+			$table = MAIN_DB_PREFIX.$index['table'];
+			$sql = 'SHOW INDEX FROM '.$table." WHERE Key_name = '".$this->db->escape($index['name'])."'";
+			$resql = $this->db->query($sql);
+			if (!$resql) {
+				$this->error = $this->db->lasterror();
+				return -1;
+			}
+			$exists = $this->db->num_rows($resql) > 0;
+			$this->db->free($resql);
+			if ($exists) {
+				continue;
+			}
+
+			$sql = 'ALTER TABLE '.$table.' ADD '.($index['unique'] ? 'UNIQUE ' : '').'INDEX '.$index['name'].' ('.$index['columns'].')';
+			if (!$this->db->query($sql)) {
+				$this->error = $this->db->lasterror();
+				return -1;
+			}
+		}
+
+		return 1;
 	}
 
 	/**

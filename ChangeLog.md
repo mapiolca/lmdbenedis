@@ -6,6 +6,7 @@
 - Ajout des demandes à état unique et durée limitée, stockage exclusif des empreintes SHA-256, contrôle du PRM retourné et suivi des échecs.
 - Blocage des synchronisations sans autorisation active et exclusion des PRM non autorisés des travaux planifiés.
 - Ajout des réglages d’URL, de durée et de l’URL de retour à déclarer dans DataHub Enedis.
+- Installation et réactivation rendues silencieusement idempotentes pour les index ; correction du rendu des dates SQL et de la validation des sélections multiples.
 
 ## 1.0.0 — 2026-08-24
 

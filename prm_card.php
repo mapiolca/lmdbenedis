@@ -52,7 +52,7 @@ if ($action === 'add' || $action === 'update') {
 		$object->fk_powerplant = 0;
 	}
 	$object->status = GETPOSTINT('status') ? 1 : 0;
-	$resources = GETPOST('resources', 'array');
+	$resources = GETPOST('resources', 'array:aZ09');
 	$resources = is_array($resources) ? array_values(array_map('strval', $resources)) : array();
 	$resources = array_values(array_unique(array_intersect($resources, array_keys(LmdbEnedisClient::getResourcePaths()))));
 	$submittedResources = $resources;
@@ -223,7 +223,7 @@ if ($isCreate || $action === 'edit' || $action === 'add' || ($action === 'update
 		$requestStatusClass = $requestStatus === LmdbEnedisAuthorization::STATUS_GRANTED ? 'badge-status4' : ($requestStatus === LmdbEnedisAuthorization::STATUS_PENDING ? 'badge-status3' : 'badge-status8');
 		$requestStatusKey = 'LmdbEnedisAuthorizationRequest'.ucfirst($requestStatus);
 		print '<tr><td>'.$langs->trans('LmdbEnedisLastAuthorizationRequest').'</td><td colspan="2"><span class="badge '.$requestStatusClass.'">'.$langs->trans($requestStatusKey).'</span>';
-		if ($latestAuthorizationRequest['date_creation'] !== '') {
+		if ($latestAuthorizationRequest['date_creation'] > 0) {
 			print ' <span class="opacitymedium">'.dol_print_date($latestAuthorizationRequest['date_creation'], 'dayhour').'</span>';
 		}
 		if ($latestAuthorizationRequest['error_code'] !== '') {

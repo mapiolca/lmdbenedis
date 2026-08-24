@@ -76,7 +76,7 @@ if ($prms === array()) {
 		if ($measureResult) {
 			while (is_object($measure = $db->fetch_object($measureResult))) {
 				$count++;
-				print '<tr class="oddeven"><td>'.dol_print_date($measure->measure_date, 'dayhour').'</td><td>'.dol_escape_htmltag(isset($resourceOptions[(string) $measure->resource_code]) ? $resourceOptions[(string) $measure->resource_code] : (string) $measure->resource_code).'</td><td class="right">'.dol_escape_htmltag((string) $measure->value).' '.dol_escape_htmltag((string) $measure->unit).'</td><td>'.dol_escape_htmltag((string) $measure->quality).'</td></tr>';
+				print '<tr class="oddeven"><td>'.dol_print_date($db->jdate((string) $measure->measure_date), 'dayhour').'</td><td>'.dol_escape_htmltag(isset($resourceOptions[(string) $measure->resource_code]) ? $resourceOptions[(string) $measure->resource_code] : (string) $measure->resource_code).'</td><td class="right">'.dol_escape_htmltag((string) $measure->value).' '.dol_escape_htmltag((string) $measure->unit).'</td><td>'.dol_escape_htmltag((string) $measure->quality).'</td></tr>';
 			}
 			$db->free($measureResult);
 		}

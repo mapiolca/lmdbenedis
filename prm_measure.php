@@ -39,7 +39,7 @@ if ($action === 'sync_period') {
 	}
 	$start = dol_mktime(0, 0, 0, GETPOSTINT('sync_startmonth'), GETPOSTINT('sync_startday'), GETPOSTINT('sync_startyear'), 'gmt');
 	$end = dol_mktime(0, 0, 0, GETPOSTINT('sync_endmonth'), GETPOSTINT('sync_endday'), GETPOSTINT('sync_endyear'), 'gmt');
-	$resources = GETPOST('resources', 'array');
+	$resources = GETPOST('resources', 'array:aZ09');
 	$resources = is_array($resources) ? array_values(array_map('strval', $resources)) : array();
 	$resources = array_values(array_unique(array_intersect($resources, $enabledResources)));
 	if ($start <= 0 || $end <= 0 || $start >= $end) {
@@ -161,7 +161,7 @@ if ($rows === array()) {
 				continue;
 			}
 			if ($field === 'm.measure_date') {
-				print '<td>'.dol_print_date($row->measure_date, 'dayhour').'</td>';
+				print '<td>'.dol_print_date($db->jdate((string) $row->measure_date), 'dayhour').'</td>';
 			} elseif ($field === 'm.resource_code') {
 				print '<td>'.dol_escape_htmltag(isset($resourceOptions[(string) $row->resource_code]) ? $resourceOptions[(string) $row->resource_code] : (string) $row->resource_code).($dimensions !== array() ? '<br><span class="opacitymedium">'.dol_escape_htmltag(implode(' / ', $dimensions)).'</span>' : '').'</td>';
 			} elseif ($field === 'm.value') {
