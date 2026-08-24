@@ -22,6 +22,7 @@ require_once __DIR__.'/../lib/lmdbenedis.lib.php';
 require_once __DIR__.'/../lib/lmdbenedis_access.lib.php';
 require_once __DIR__.'/../class/lmdbenedisconfig.class.php';
 require_once __DIR__.'/../class/lmdbenedisclient.class.php';
+require_once __DIR__.'/../class/lmdbenedisauthorization.class.php';
 
 $langs->loadLangs(array('admin', 'lmdbenedis@lmdbenedis'));
 if (!isModEnabled('lmdbenedis') || !lmdbenedisUserIsFullAdmin($user)) {
@@ -36,6 +37,8 @@ if ($action === 'save_settings') {
 		'LMDBENEDIS_API_BASE_URL' => rtrim(trim(GETPOST('LMDBENEDIS_API_BASE_URL', 'url')), '/'),
 		'LMDBENEDIS_TOKEN_URL' => trim(GETPOST('LMDBENEDIS_TOKEN_URL', 'url')),
 		'LMDBENEDIS_CLIENT_ID' => trim(GETPOST('LMDBENEDIS_CLIENT_ID', 'alphanohtml')),
+		'LMDBENEDIS_AUTHORIZE_URL' => rtrim(trim(GETPOST('LMDBENEDIS_AUTHORIZE_URL', 'url')), '/'),
+		'LMDBENEDIS_AUTHORIZATION_DURATION' => GETPOST('LMDBENEDIS_AUTHORIZATION_DURATION', 'aZ09'),
 		'LMDBENEDIS_BACKFILL_DAYS' => (string) min(1100, max(1, GETPOSTINT('LMDBENEDIS_BACKFILL_DAYS'))),
 		'LMDBENEDIS_SYNC_LAG_DAYS' => (string) min(30, max(0, GETPOSTINT('LMDBENEDIS_SYNC_LAG_DAYS'))),
 		'LMDBENEDIS_HTTP_TIMEOUT' => (string) min(300, max(5, GETPOSTINT('LMDBENEDIS_HTTP_TIMEOUT'))),
@@ -49,6 +52,11 @@ if ($action === 'save_settings') {
 		$error++;
 		$endpointError = true;
 		setEventMessages($langs->trans('LmdbEnedisInvalidEndpoints'), null, 'errors');
+	}
+	if (!LmdbEnedisAuthorization::isAllowedAuthorizeUrl($settings['LMDBENEDIS_AUTHORIZE_URL']) || !isset(LmdbEnedisAuthorization::getDurationOptions()[$settings['LMDBENEDIS_AUTHORIZATION_DURATION']])) {
+		$error++;
+		$endpointError = true;
+		setEventMessages($langs->trans('LmdbEnedisInvalidAuthorizationSettings'), null, 'errors');
 	}
 	if (!$error) {
 		$db->begin();
@@ -101,6 +109,11 @@ if ($action === 'test_connection') {
 }
 
 $form = new Form($db);
+$durationOptions = array();
+foreach (LmdbEnedisAuthorization::getDurationOptions() as $duration => $label) {
+	$durationOptions[$duration] = $langs->trans('LmdbEnedisAuthorizationDuration'.$duration);
+}
+$callbackUrl = LmdbEnedisAuthorization::getCallbackUrl();
 $formConfirm = '';
 if ($action === 'clear_secret') {
 	$formConfirm = $form->formconfirm(
@@ -127,6 +140,14 @@ print '<tr class="oddeven"><td class="titlefield">'.$langs->trans('LmdbEnedisApi
 print '<tr class="oddeven"><td>'.$langs->trans('LmdbEnedisTokenUrl').'</td><td><input class="flat minwidth500" name="LMDBENEDIS_TOKEN_URL" value="'.dol_escape_htmltag(getDolGlobalString('LMDBENEDIS_TOKEN_URL')).'"></td></tr>';
 print '<tr class="oddeven"><td>'.$langs->trans('LmdbEnedisClientId').'</td><td><input class="flat minwidth300" autocomplete="off" name="LMDBENEDIS_CLIENT_ID" value="'.dol_escape_htmltag(getDolGlobalString('LMDBENEDIS_CLIENT_ID')).'"></td></tr>';
 print '<tr class="oddeven"><td>'.$langs->trans('LmdbEnedisClientSecret').'</td><td><input class="flat minwidth300" type="password" autocomplete="new-password" name="LMDBENEDIS_CLIENT_SECRET" value="" placeholder="'.(LmdbEnedisConfig::getClientSecret() !== '' ? dol_escape_htmltag($langs->trans('LmdbEnedisSecretAlreadySaved')) : '').'"></td></tr>';
+print '<tr class="liste_titre"><td colspan="2">'.$langs->trans('LmdbEnedisAuthorizationSettings').'</td></tr>';
+print '<tr class="oddeven"><td>'.$langs->trans('LmdbEnedisAuthorizeUrl').'</td><td><input class="flat minwidth500" name="LMDBENEDIS_AUTHORIZE_URL" value="'.dol_escape_htmltag(getDolGlobalString('LMDBENEDIS_AUTHORIZE_URL')).'"></td></tr>';
+print '<tr class="oddeven"><td>'.$langs->trans('LmdbEnedisAuthorizationDuration').'</td><td>'.$form->selectarray('LMDBENEDIS_AUTHORIZATION_DURATION', $durationOptions, getDolGlobalString('LMDBENEDIS_AUTHORIZATION_DURATION', 'P3Y'), 0, 0, 0, '', 0, 0, 0, '', 'minwidth200').'</td></tr>';
+print '<tr class="oddeven"><td>'.$langs->trans('LmdbEnedisAuthorizationCallbackUrl').'</td><td><code>'.dol_escape_htmltag($callbackUrl).'</code><br><span class="opacitymedium">'.$langs->trans('LmdbEnedisAuthorizationCallbackHelp').'</span>';
+if (!LmdbEnedisAuthorization::isAllowedCallbackUrl($callbackUrl)) {
+	print '<br><span class="error">'.$langs->trans('LmdbEnedisAuthorizationCallbackHttpsRequired').'</span>';
+}
+print '</td></tr>';
 print '<tr class="liste_titre"><td colspan="2">'.$langs->trans('LmdbEnedisSynchronizationSettings').'</td></tr>';
 print '<tr class="oddeven"><td>'.$langs->trans('LmdbEnedisBackfillDays').'</td><td><input class="flat width75" name="LMDBENEDIS_BACKFILL_DAYS" value="'.getDolGlobalInt('LMDBENEDIS_BACKFILL_DAYS', 30).'"> '.$langs->trans('days').'</td></tr>';
 print '<tr class="oddeven"><td>'.$langs->trans('LmdbEnedisSyncLagDays').'</td><td><input class="flat width75" name="LMDBENEDIS_SYNC_LAG_DAYS" value="'.getDolGlobalInt('LMDBENEDIS_SYNC_LAG_DAYS', 2).'"> '.$langs->trans('days').' <span class="opacitymedium">'.$langs->trans('LmdbEnedisSyncLagHelp').'</span></td></tr>';

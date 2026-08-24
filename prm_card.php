@@ -17,6 +17,7 @@ require_once DOL_DOCUMENT_ROOT.'/societe/class/societe.class.php';
 require_once __DIR__.'/class/lmdbenedisprm.class.php';
 require_once __DIR__.'/class/lmdbenedissynchronizer.class.php';
 require_once __DIR__.'/class/lmdbenedisconfig.class.php';
+require_once __DIR__.'/class/lmdbenedisauthorization.class.php';
 require_once __DIR__.'/lib/lmdbenedis.lib.php';
 require_once __DIR__.'/lib/lmdbenedis_access.lib.php';
 
@@ -50,11 +51,6 @@ if ($action === 'add' || $action === 'update') {
 	} elseif ($action === 'add') {
 		$object->fk_powerplant = 0;
 	}
-	$object->authorization_reference = GETPOST('authorization_reference', 'restricthtml');
-	$authYear = GETPOSTINT('authorization_endyear');
-	$authMonth = GETPOSTINT('authorization_endmonth');
-	$authDay = GETPOSTINT('authorization_endday');
-	$object->authorization_end = $authYear > 0 && $authMonth > 0 && $authDay > 0 ? dol_mktime(0, 0, 0, $authMonth, $authDay, $authYear, 'gmt') : null;
 	$object->status = GETPOSTINT('status') ? 1 : 0;
 	$resources = GETPOST('resources', 'array');
 	$resources = is_array($resources) ? array_values(array_map('strval', $resources)) : array();
@@ -118,6 +114,23 @@ if ($action === 'sync' && $id > 0) {
 	exit;
 }
 
+if ($action === 'request_authorization' && $id > 0) {
+	if (!lmdbenedisCanDo($user, 'prm', 'write', $object)) {
+		accessforbidden();
+	}
+	try {
+		$authorization = new LmdbEnedisAuthorization($db);
+		$authorizationUrl = $authorization->createRequest($object, $user);
+		header('Location: '.$authorizationUrl, true, 303);
+		exit;
+	} catch (Throwable $e) {
+		setEventMessages($langs->trans('LmdbEnedisAuthorizationStartFailed'), null, 'errors');
+		dol_syslog('LMDB Enedis authorization request failed: '.$e->getMessage(), LOG_ERR);
+		header('Location: '.dol_buildpath('/lmdbenedis/prm_card.php', 1).'?id='.(int) $id);
+		exit;
+	}
+}
+
 $formConfirm = '';
 if ($action === 'delete' && $id > 0 && lmdbenedisCanDo($user, 'prm', 'delete', $object)) {
 	$formConfirm = $form->formconfirm(
@@ -162,8 +175,15 @@ if ($isCreate || $action === 'edit' || $action === 'add' || ($action === 'update
 	if (lmdbenedisCanReadPowerPlant($user)) {
 		print '<tr><td>'.$langs->trans('PowerPlant').'</td><td>'.$form->selectarray('fk_powerplant', lmdbenedisPowerPlantOptions(), (int) $object->fk_powerplant, 1, 0, 0, '', 0, 0, 0, '', 'minwidth300').'</td></tr>';
 	}
-	print '<tr><td>'.$langs->trans('LmdbEnedisAuthorizationReference').'</td><td><input class="flat minwidth300" name="authorization_reference" value="'.dol_escape_htmltag($object->authorization_reference).'"></td></tr>';
-	print '<tr><td>'.$langs->trans('LmdbEnedisAuthorizationEnd').'</td><td>'.$form->selectDate($object->authorization_end, 'authorization_end', 0, 0, 1).'</td></tr>';
+	print '<tr><td>'.$langs->trans('LmdbEnedisAuthorization').'</td><td>';
+	if ($id > 0 && $object->hasActiveAuthorization()) {
+		print '<span class="badge badge-status4">'.$langs->trans('LmdbEnedisAuthorizationActive').'</span>';
+	} elseif ($id > 0 && !empty($object->authorization_reference)) {
+		print '<span class="badge badge-status8">'.$langs->trans('LmdbEnedisAuthorizationExpiredStatus').'</span>';
+	} else {
+		print '<span class="badge badge-status0">'.$langs->trans('LmdbEnedisAuthorizationRequired').'</span>';
+	}
+	print ' <span class="opacitymedium">'.$langs->trans('LmdbEnedisAuthorizationManagedByEnedis').'</span></td></tr>';
 	print '<tr><td class="fieldrequired">'.$langs->trans('LmdbEnedisResources').'</td><td>'.$form->multiselectarray('resources', lmdbenedisResourceOptions(), $selectedResources, 0, 0, 'minwidth500').'</td></tr>';
 	print '<tr><td>'.$langs->trans('Status').'</td><td>'.$form->selectarray('status', array(1 => $langs->trans('Enabled'), 0 => $langs->trans('Disabled')), (int) $object->status, 0, 0, 0, '', 0, 0, 0, '', 'minwidth150').'</td></tr>';
 	print '</table>';
@@ -191,8 +211,26 @@ if ($isCreate || $action === 'edit' || $action === 'add' || ($action === 'update
 		}
 		print '</td></tr>';
 	}
-	print '<tr><td>'.$langs->trans('LmdbEnedisAuthorizationReference').'</td><td colspan="2">'.dol_escape_htmltag($object->authorization_reference).'</td></tr>';
+	$authorizationStatusClass = $object->hasActiveAuthorization() ? 'badge-status4' : (!empty($object->authorization_reference) ? 'badge-status8' : 'badge-status0');
+	$authorizationStatusLabel = $object->hasActiveAuthorization() ? $langs->trans('LmdbEnedisAuthorizationActive') : (!empty($object->authorization_reference) ? $langs->trans('LmdbEnedisAuthorizationExpiredStatus') : $langs->trans('LmdbEnedisAuthorizationRequired'));
+	print '<tr><td>'.$langs->trans('LmdbEnedisAuthorization').'</td><td colspan="2"><span class="badge '.$authorizationStatusClass.'">'.dol_escape_htmltag($authorizationStatusLabel).'</span></td></tr>';
+	print '<tr><td>'.$langs->trans('LmdbEnedisAuthorizationReference').'</td><td colspan="2"><span class="opacitymedium">'.dol_escape_htmltag($object->authorization_reference).'</span></td></tr>';
 	print '<tr><td>'.$langs->trans('LmdbEnedisAuthorizationEnd').'</td><td colspan="2">'.(!empty($object->authorization_end) ? dol_print_date($object->authorization_end, 'day') : '').'</td></tr>';
+	$authorizationService = new LmdbEnedisAuthorization($db);
+	$latestAuthorizationRequest = $authorizationService->getLatestRequest((int) $object->id, (int) $object->entity);
+	if ($latestAuthorizationRequest !== array()) {
+		$requestStatus = $latestAuthorizationRequest['status'];
+		$requestStatusClass = $requestStatus === LmdbEnedisAuthorization::STATUS_GRANTED ? 'badge-status4' : ($requestStatus === LmdbEnedisAuthorization::STATUS_PENDING ? 'badge-status3' : 'badge-status8');
+		$requestStatusKey = 'LmdbEnedisAuthorizationRequest'.ucfirst($requestStatus);
+		print '<tr><td>'.$langs->trans('LmdbEnedisLastAuthorizationRequest').'</td><td colspan="2"><span class="badge '.$requestStatusClass.'">'.$langs->trans($requestStatusKey).'</span>';
+		if ($latestAuthorizationRequest['date_creation'] !== '') {
+			print ' <span class="opacitymedium">'.dol_print_date($latestAuthorizationRequest['date_creation'], 'dayhour').'</span>';
+		}
+		if ($latestAuthorizationRequest['error_code'] !== '') {
+			print ' <span class="opacitymedium">'.dol_escape_htmltag($latestAuthorizationRequest['error_code']).'</span>';
+		}
+		print '</td></tr>';
+	}
 	print '<tr><td>'.$langs->trans('LmdbEnedisResources').'</td><td colspan="2">';
 	$resourceOptions = lmdbenedisResourceOptions();
 	foreach ($object->getEnabledStreams() as $resourceCode) {
@@ -210,8 +248,11 @@ if ($isCreate || $action === 'edit' || $action === 'add' || ($action === 'update
 	print '<div class="tabsAction">';
 	if (lmdbenedisCanDo($user, 'prm', 'write', $object)) {
 		print '<a class="button" href="'.dol_buildpath('/lmdbenedis/prm_card.php', 1).'?id='.(int) $id.'&action=edit">'.$langs->trans('Modify').'</a>';
+		if (LmdbEnedisAuthorization::isConfigured()) {
+			print ' <form class="inline-block" method="POST" action="'.dol_buildpath('/lmdbenedis/prm_card.php', 1).'"><input type="hidden" name="token" value="'.newToken().'"><input type="hidden" name="action" value="request_authorization"><input type="hidden" name="id" value="'.(int) $id.'"><input class="button" type="submit" value="'.$langs->trans($object->hasActiveAuthorization() ? 'LmdbEnedisRenewAuthorization' : 'LmdbEnedisRequestAuthorization').'"></form>';
+		}
 	}
-	if (lmdbenedisCanDo($user, 'prm', 'sync', $object)) {
+	if (!empty($object->status) && $object->hasActiveAuthorization() && lmdbenedisCanDo($user, 'prm', 'sync', $object)) {
 		print ' <form class="inline-block" method="POST" action="'.dol_buildpath('/lmdbenedis/prm_card.php', 1).'"><input type="hidden" name="token" value="'.newToken().'"><input type="hidden" name="action" value="sync"><input type="hidden" name="id" value="'.(int) $id.'"><input class="button" type="submit" value="'.$langs->trans('LmdbEnedisSync').'"></form>';
 	}
 	if (lmdbenedisCanDo($user, 'prm', 'delete', $object)) {

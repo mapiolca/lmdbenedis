@@ -24,6 +24,7 @@ if (!isModEnabled('lmdbenedis') || !lmdbenedisCanDo($user, 'prm', 'read')) {
 $searchPrm = GETPOST('search_prm', 'restricthtml');
 $searchLabel = GETPOST('search_label', 'restricthtml');
 $searchStatus = GETPOST('search_status', 'int');
+$searchAuthorization = GETPOST('search_authorization', 'aZ09');
 $sortfield = GETPOST('sortfield', 'aZ09comma') ?: 't.usage_point_id';
 $sortorder = GETPOST('sortorder', 'aZ09comma') ?: 'ASC';
 $limit = GETPOSTINT('limit') > 0 ? GETPOSTINT('limit') : $conf->liste_limit;
@@ -40,6 +41,16 @@ if ($searchLabel !== '') {
 if ($searchStatus !== '') {
 	$where .= ' AND t.status = '.((int) $searchStatus);
 }
+$today = gmdate('Y-m-d');
+if ($searchAuthorization === 'active') {
+	$where .= " AND t.authorization_reference IS NOT NULL AND t.authorization_reference <> ''";
+	$where .= " AND (t.authorization_end IS NULL OR t.authorization_end >= '".$db->escape($today)."')";
+} elseif ($searchAuthorization === 'required') {
+	$where .= " AND (t.authorization_reference IS NULL OR t.authorization_reference = '')";
+} elseif ($searchAuthorization === 'expired') {
+	$where .= " AND t.authorization_reference IS NOT NULL AND t.authorization_reference <> ''";
+	$where .= " AND t.authorization_end IS NOT NULL AND t.authorization_end < '".$db->escape($today)."'";
+}
 $countSql = 'SELECT COUNT(*) AS nb FROM '.MAIN_DB_PREFIX.'lmdbenedis_prm AS t'.$where;
 $countResult = $db->query($countSql);
 if (!$countResult) {
@@ -50,9 +61,9 @@ $countRow = $db->fetch_object($countResult);
 $totalnboflines = is_object($countRow) ? (int) $countRow->nb : 0;
 $db->free($countResult);
 
-$sql = 'SELECT t.rowid, t.usage_point_id, t.label, t.status, t.last_sync_at, t.last_sync_status, t.fk_powerplant';
+$sql = 'SELECT t.rowid, t.usage_point_id, t.label, t.authorization_reference, t.authorization_end, t.status, t.last_sync_at, t.last_sync_status, t.fk_powerplant';
 $sql .= ' FROM '.MAIN_DB_PREFIX.'lmdbenedis_prm AS t'.$where;
-$allowedSorts = array('t.usage_point_id', 't.label', 't.status', 't.last_sync_at');
+$allowedSorts = array('t.usage_point_id', 't.label', 't.authorization_reference', 't.status', 't.last_sync_at');
 if (!in_array($sortfield, $allowedSorts, true)) {
 	$sortfield = 't.usage_point_id';
 }
@@ -73,13 +84,14 @@ $db->free($resql);
 $arrayfields = array(
 	't.usage_point_id' => array('label' => 'LmdbEnedisUsagePointId', 'checked' => 1, 'position' => 10),
 	't.label' => array('label' => 'Label', 'checked' => 1, 'position' => 20),
-	't.status' => array('label' => 'Status', 'checked' => 1, 'position' => 30),
-	't.last_sync_at' => array('label' => 'LmdbEnedisLastSync', 'checked' => 1, 'position' => 40),
-	't.last_sync_status' => array('label' => 'LmdbEnedisLastSyncStatus', 'checked' => 1, 'position' => 50),
+	't.authorization_reference' => array('label' => 'LmdbEnedisAuthorization', 'checked' => 1, 'position' => 30),
+	't.status' => array('label' => 'Status', 'checked' => 1, 'position' => 40),
+	't.last_sync_at' => array('label' => 'LmdbEnedisLastSync', 'checked' => 1, 'position' => 50),
+	't.last_sync_status' => array('label' => 'LmdbEnedisLastSyncStatus', 'checked' => 1, 'position' => 60),
 );
 $selectedFields = Form::multiSelectArrayWithCheckbox('selectedfields', $arrayfields, 'lmdbenedisprmlist');
 $form = new Form($db);
-$param = '&search_prm='.urlencode($searchPrm).'&search_label='.urlencode($searchLabel).'&search_status='.urlencode((string) $searchStatus);
+$param = '&search_prm='.urlencode($searchPrm).'&search_label='.urlencode($searchLabel).'&search_authorization='.urlencode($searchAuthorization).'&search_status='.urlencode((string) $searchStatus);
 $newButton = lmdbenedisCanDo($user, 'prm', 'write') ? dolGetButtonTitle($langs->trans('LmdbEnedisCreatePrm'), '', 'fa fa-plus-circle', dol_buildpath('/lmdbenedis/prm_card.php', 1).'?action=create') : '';
 
 llxHeader('', $langs->trans('LmdbEnedisPrmList'));
@@ -102,6 +114,12 @@ foreach ($arrayfields as $field => $definition) {
 		print '<input class="flat maxwidth150" name="search_label" value="'.dol_escape_htmltag($searchLabel).'">';
 	} elseif ($field === 't.status') {
 		print $form->selectarray('search_status', array(1 => $langs->trans('Enabled'), 0 => $langs->trans('Disabled')), $searchStatus, 1, 0, 0, '', 0, 0, 0, '', 'maxwidth125');
+	} elseif ($field === 't.authorization_reference') {
+		print $form->selectarray('search_authorization', array(
+			'active' => $langs->trans('LmdbEnedisAuthorizationActive'),
+			'required' => $langs->trans('LmdbEnedisAuthorizationRequiredStatus'),
+			'expired' => $langs->trans('LmdbEnedisAuthorizationExpiredStatus'),
+		), $searchAuthorization, 1, 0, 0, '', 0, 0, 0, '', 'maxwidth150');
 	}
 	print '</td>';
 }
@@ -121,6 +139,8 @@ if ($rows === array()) {
 		$prm = new LmdbEnedisPrm($db);
 		$prm->id = (int) $row->rowid;
 		$prm->usage_point_id = (string) $row->usage_point_id;
+		$prm->authorization_reference = (string) $row->authorization_reference;
+		$prm->authorization_end = $row->authorization_end;
 		$prm->status = (int) $row->status;
 		print '<tr class="oddeven">';
 		foreach ($arrayfields as $field => $definition) {
@@ -133,6 +153,10 @@ if ($rows === array()) {
 				print '<td>'.dol_escape_htmltag((string) $row->label).'</td>';
 			} elseif ($field === 't.status') {
 				print '<td>'.$prm->getLibStatut(5).'</td>';
+			} elseif ($field === 't.authorization_reference') {
+				$authorizationClass = $prm->hasActiveAuthorization() ? 'badge-status4' : ($prm->authorization_reference !== '' ? 'badge-status8' : 'badge-status0');
+				$authorizationLabel = $prm->hasActiveAuthorization() ? $langs->trans('LmdbEnedisAuthorizationActive') : ($prm->authorization_reference !== '' ? $langs->trans('LmdbEnedisAuthorizationExpiredStatus') : $langs->trans('LmdbEnedisAuthorizationRequiredStatus'));
+				print '<td><span class="badge '.$authorizationClass.'">'.dol_escape_htmltag($authorizationLabel).'</span></td>';
 			} elseif ($field === 't.last_sync_at') {
 				print '<td>'.(!empty($row->last_sync_at) ? dol_print_date($row->last_sync_at, 'dayhour') : '').'</td>';
 			} else {

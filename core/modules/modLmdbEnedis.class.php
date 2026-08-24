@@ -40,7 +40,7 @@ class modLmdbEnedis extends DolibarrModules
 		$this->name = preg_replace('/^mod/i', '', get_class($this));
 		$this->description = 'LmdbEnedisModuleDescription';
 		$this->descriptionlong = 'LmdbEnedisModuleDescriptionLong';
-		$this->version = '1.0.0';
+		$this->version = '1.1.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'fa-bolt';
 		$this->editor_name = 'Les Métiers du Bâtiment';
@@ -66,6 +66,8 @@ class modLmdbEnedis extends DolibarrModules
 			6 => array('LMDBENEDIS_SYNC_LAG_DAYS', 'chaine', '2', 'Safety delay before automatic synchronization', 0, 'current', 1),
 			7 => array('LMDBENEDIS_HTTP_TIMEOUT', 'chaine', '60', 'HTTP response timeout in seconds', 0, 'current', 1),
 			8 => array('LMDBENEDIS_CRON_MAX_PRMS', 'chaine', '50', 'Maximum number of PRMs per cron execution', 0, 'current', 1),
+			9 => array('LMDBENEDIS_AUTHORIZE_URL', 'chaine', 'https://mon-compte-particulier.enedis.fr/dataconnect/v1/oauth2/authorize', 'Data Connect Autorisation V1 URL', 0, 'current', 1),
+			10 => array('LMDBENEDIS_AUTHORIZATION_DURATION', 'chaine', 'P3Y', 'Requested Data Connect authorization duration', 0, 'current', 1),
 		);
 
 		$this->tabs = array();

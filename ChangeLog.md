@@ -1,5 +1,12 @@
 # Historique des versions
 
+## 1.1.0 — 2026-08-25
+
+- Ajout du parcours Autorisation V1 depuis une fiche PRM, avec redirection vers le compte du titulaire et callback public HTTPS.
+- Ajout des demandes à état unique et durée limitée, stockage exclusif des empreintes SHA-256, contrôle du PRM retourné et suivi des échecs.
+- Blocage des synchronisations sans autorisation active et exclusion des PRM non autorisés des travaux planifiés.
+- Ajout des réglages d’URL, de durée et de l’URL de retour à déclarer dans DataHub Enedis.
+
 ## 1.0.0 — 2026-08-24
 
 - Ajout de la configuration OAuth2 Enedis Data Connect par entité.

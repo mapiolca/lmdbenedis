@@ -73,6 +73,22 @@ class LmdbEnedisPrm extends CommonObject
 	}
 
 	/**
+	 * Fetch a PRM in the entity recorded by a validated authorization request.
+	 *
+	 * @param int $id     PRM ID
+	 * @param int $entity Entity ID
+	 * @return int
+	 */
+	public function fetchForEntity($id, $entity)
+	{
+		if ($id <= 0 || $entity <= 0) {
+			return -1;
+		}
+
+		return $this->fetchCommon($id, null, ' AND t.entity = '.((int) $entity), 1);
+	}
+
+	/**
 	 * @param User $user      User
 	 * @param int  $notrigger Disable trigger
 	 * @return int
@@ -165,6 +181,80 @@ class LmdbEnedisPrm extends CommonObject
 	}
 
 	/**
+	 * Apply an authorization returned by the official Enedis callback.
+	 *
+	 * @param string $reference         One-way authorization-code fingerprint
+	 * @param int    $authorizationEnd  Authorization end timestamp
+	 * @param User   $user              User who initiated the request
+	 * @param int    $notrigger         Disable trigger
+	 * @param int    $manageTransaction Manage the SQL transaction
+	 * @return int
+	 */
+	public function applyAuthorization($reference, $authorizationEnd, User $user, $notrigger = 0, $manageTransaction = 1)
+	{
+		global $langs;
+
+		$langs->load('lmdbenedis@lmdbenedis');
+		if ((int) $this->id <= 0 || (int) $this->entity <= 0 || !preg_match('/^sha256:[a-f0-9]{64}$/D', $reference) || $authorizationEnd <= 0) {
+			$this->error = $langs->trans('LmdbEnedisInvalidAuthorizationCallback');
+			$this->errors[] = $this->error;
+			return -1;
+		}
+		$old = clone $this;
+		$this->authorization_reference = $reference;
+		$this->authorization_end = $authorizationEnd;
+		$this->fk_user_modif = (int) $user->id;
+		$this->oldcopy = $old;
+
+		if ($manageTransaction) {
+			$this->db->begin();
+		}
+		$sql = 'UPDATE '.MAIN_DB_PREFIX.'lmdbenedis_prm SET';
+		$sql .= " authorization_reference = '".$this->db->escape($this->authorization_reference)."'";
+		$sql .= ', authorization_end = '.$this->nullableDate($this->authorization_end);
+		$sql .= ', fk_user_modif = '.((int) $this->fk_user_modif);
+		$sql .= ' WHERE rowid = '.((int) $this->id).' AND entity = '.((int) $this->entity);
+		if (!$this->db->query($sql)) {
+			$this->error = $this->db->lasterror();
+			$this->errors[] = $this->error;
+			if ($manageTransaction) {
+				$this->db->rollback();
+			}
+			return -1;
+		}
+		$this->context['trigger_reason'] = 'authorization_granted';
+		$this->context['changed_fields'] = array('authorization_reference', 'authorization_end');
+		if (!$notrigger && $this->call_trigger('LMDBENEDIS_PRM_UPDATE', $user) < 0) {
+			if ($manageTransaction) {
+				$this->db->rollback();
+			}
+			return -1;
+		}
+		if ($manageTransaction) {
+			$this->db->commit();
+		}
+
+		return 1;
+	}
+
+	/**
+	 * @return bool
+	 */
+	public function hasActiveAuthorization()
+	{
+		if (trim($this->authorization_reference) === '') {
+			return false;
+		}
+		if (empty($this->authorization_end)) {
+			return true;
+		}
+		$authorizationEnd = is_numeric($this->authorization_end) ? (int) $this->authorization_end : strtotime((string) $this->authorization_end.' UTC');
+		$today = gmmktime(0, 0, 0, (int) gmdate('n'), (int) gmdate('j'), (int) gmdate('Y'));
+
+		return $authorizationEnd !== false && $authorizationEnd >= $today;
+	}
+
+	/**
 	 * @param User $user      User
 	 * @param int  $notrigger Disable trigger
 	 * @return int
@@ -181,7 +271,7 @@ class LmdbEnedisPrm extends CommonObject
 			$this->db->rollback();
 			return -1;
 		}
-		foreach (array('lmdbenedis_measure', 'lmdbenedis_prm_stream') as $table) {
+		foreach (array('lmdbenedis_measure', 'lmdbenedis_prm_stream', 'lmdbenedis_authorization_request') as $table) {
 			$sql = 'DELETE FROM '.MAIN_DB_PREFIX.$table.' WHERE fk_prm = '.((int) $this->id).' AND entity = '.((int) $conf->entity);
 			if (!$this->db->query($sql)) {
 				$this->error = $this->db->lasterror();

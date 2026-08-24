@@ -5,6 +5,7 @@ Module externe Dolibarr pour collecter et exploiter les mesures de consommation 
 ## Fonctionnalités V1
 
 - configuration OAuth2 Client Credentials par entité, avec secret chiffré par Dolibarr ;
+- parcours **Autorisation V1** depuis la fiche PRM, avec consentement du titulaire sur le portail Enedis et callback sécurisé ;
 - registre autonome des PRM autorisés ;
 - activation indépendante des sept flux Mesures V1 ;
 - synchronisation manuelle et planifiée, avec découpage automatique des périodes ;
@@ -14,9 +15,11 @@ Module externe Dolibarr pour collecter et exploiter les mesures de consommation 
 
 ## Autorisations et sécurité
 
-Le module n’obtient pas le consentement du titulaire : seuls les PRM déjà autorisés pour l’application Data Connect doivent être enregistrés. Enedis reste la source d’autorité et refuse un PRM ou un flux non couvert par l’autorisation. La date de fin facultative enregistrée dans Dolibarr ajoute un garde-fou local : une autorisation expirée bloque la synchronisation.
+Après création d’une fiche PRM, l’action **Obtenir l’autorisation Enedis** redirige le titulaire vers son compte Enedis. Le retour officiel contient un code, un état de sécurité et le PRM autorisé. Le module n’accepte le retour que si l’état correspond à une demande en attente, non expirée et rattachée au même PRM. Enedis reste la source d’autorité et peut refuser un PRM ou un flux non couvert par le consentement.
 
-Les identifiants, autorisations, curseurs et mesures sont strictement séparés par entité Dolibarr. Le secret client est chiffré avec `dolEncrypt()` et les appels HTTP n’utilisent pas le helper journalisant les en-têtes d’authentification. Les URLs configurables restent limitées aux hôtes HTTPS du domaine `api.enedis.fr`.
+L’URL HTTPS affichée dans la configuration du module doit être déclarée exactement comme URL de redirection de l’application dans DataHub Enedis. La durée demandée est configurable entre trois mois et trois ans. Une autorisation absente ou expirée bloque les synchronisations manuelles et planifiées.
+
+Les identifiants, demandes d’autorisation, curseurs et mesures sont strictement séparés par entité Dolibarr. Le secret client est chiffré avec `dolEncrypt()`. Les états OAuth2 et les codes d’autorisation ne sont jamais stockés en clair : seules leurs empreintes SHA-256 sont conservées. Les appels HTTP n’utilisent pas le helper journalisant les en-têtes d’authentification. Les URLs Mesures V1 restent limitées aux hôtes HTTPS du domaine `api.enedis.fr` et l’URL Autorisation V1 au portail officiel `mon-compte-particulier.enedis.fr`.
 
 La synchronisation automatique respecte une période de sécurité configurable et découpe les courbes de charge par tranches de sept jours. Le client applique les profondeurs historiques officielles : 24 mois et 15 jours pour les courbes de charge, 36 mois et 15 jours pour les mesures quotidiennes et la puissance maximale. Les index restent soumis à la profondeur effectivement accordée par Enedis, aucune borne n’étant publiée pour ces deux ressources dans le contrat Mesures V1.
 
@@ -36,9 +39,12 @@ Placer le répertoire `lmdbenedis` dans le répertoire des modules externes de D
 
 La tâche **Synchronisation Enedis Mesures V1** est déclarée dans les Travaux planifiés de Dolibarr. Elle est désactivée par défaut.
 
+Avant le premier consentement, recopier l’URL **URL de retour à déclarer auprès d’Enedis** depuis la configuration du module vers la configuration de l’application DataHub. L’instance Dolibarr doit être accessible publiquement en HTTPS sur cette URL.
+
 ## Sources officielles
 
 - [Documentation Mesures V1](https://datahub-enedis.fr/services-api/data-connect/documentation/mesures-v1/)
+- [Documentation Autorisation V1](https://datahub-enedis.fr/services-api/data-connect/documentation/autorisation-v1/)
 - [Enedis DataHub](https://datahub-enedis.fr/)
 
 ## Licence

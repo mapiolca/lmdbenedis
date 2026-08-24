@@ -58,6 +58,15 @@ class LmdbEnedisSynchronizer
 			$result['errors']++;
 			return $result;
 		}
+		if (trim($prm->authorization_reference) === '') {
+			$this->error = $langs->trans('LmdbEnedisAuthorizationRequired');
+			$this->errors[] = $this->error;
+			$result['errors']++;
+			if (!$this->savePrmSyncState((int) $prm->id, 'error', $this->error)) {
+				$result['errors']++;
+			}
+			return $result;
+		}
 		$utcToday = dol_mktime(0, 0, 0, (int) gmdate('n'), (int) gmdate('j'), (int) gmdate('Y'), 'gmt');
 		$authorizationEnd = empty($prm->authorization_end) ? 0 : (is_numeric($prm->authorization_end) ? (int) $prm->authorization_end : (int) strtotime((string) $prm->authorization_end.' UTC'));
 		if ($authorizationEnd > 0 && $authorizationEnd < $utcToday) {
@@ -185,6 +194,8 @@ class LmdbEnedisSynchronizer
 			$sql = 'SELECT DISTINCT p.rowid FROM '.MAIN_DB_PREFIX.'lmdbenedis_prm AS p';
 			$sql .= ' INNER JOIN '.MAIN_DB_PREFIX.'lmdbenedis_prm_stream AS s ON s.fk_prm = p.rowid AND s.entity = p.entity AND s.active = 1';
 			$sql .= ' WHERE p.entity = '.((int) $conf->entity).' AND p.status = 1';
+			$sql .= " AND p.authorization_reference IS NOT NULL AND p.authorization_reference <> ''";
+			$sql .= " AND (p.authorization_end IS NULL OR p.authorization_end >= '".$this->db->escape(gmdate('Y-m-d'))."')";
 			$sql .= ' ORDER BY p.last_sync_at ASC, p.rowid ASC LIMIT '.((int) $limit);
 			$resql = $this->db->query($sql);
 			if (!$resql) {

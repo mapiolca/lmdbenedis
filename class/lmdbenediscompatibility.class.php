@@ -3,6 +3,7 @@
 
 require_once __DIR__.'/lmdbenedisconfig.class.php';
 require_once __DIR__.'/lmdbenedisclient.class.php';
+require_once __DIR__.'/lmdbenedisauthorization.class.php';
 
 /**
  * Central compatibility registry.
@@ -19,6 +20,7 @@ class LmdbEnedisCompatibility
 		$curlOk = function_exists('curl_init');
 		$configured = LmdbEnedisConfig::isConnectionConfigured();
 		$cronEnabled = isModEnabled('cron');
+		$authorizationConfigured = LmdbEnedisAuthorization::isConfigured();
 		$endpointsOk = false;
 		if ($configured) {
 			try {
@@ -30,6 +32,17 @@ class LmdbEnedisCompatibility
 		}
 
 		return array(
+			'authorization_v1' => array(
+				'label' => 'LmdbEnedisFeatureAuthorizationV1',
+				'description' => 'LmdbEnedisFeatureAuthorizationV1Description',
+				'min_dolibarr' => '20.0.0',
+				'core_available_from' => '20.0.0',
+				'module_available_from' => '20.0.0',
+				'min_php' => '8.0.0',
+				'compatibility_check' => "version_compare(DOL_VERSION, '20.0.0', '>=') && PHP_VERSION >= 8.0.0 && authorization_url_valid && callback_url_https",
+				'available' => $dolibarrOk && $phpOk && $authorizationConfigured,
+				'reason' => !$dolibarrOk ? 'LmdbEnedisRequiresDolibarr20' : (!$phpOk ? 'LmdbEnedisRequiresPhp80' : ($authorizationConfigured ? '' : 'LmdbEnedisRequiresAuthorizationConfiguration')),
+			),
 			'measure_v1' => array(
 				'label' => 'LmdbEnedisFeatureMeasureV1',
 				'description' => 'LmdbEnedisFeatureMeasureV1Description',
