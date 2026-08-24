@@ -42,7 +42,7 @@ if ($action === 'add' || $action === 'update') {
 	if ($action === 'add') {
 		$object = new LmdbEnedisPrm($db);
 	}
-	$object->usage_point_id = GETPOST('usage_point_id', 'digits');
+	$object->usage_point_id = GETPOST('usage_point_id', 'aZ09');
 	$object->label = GETPOST('label', 'restricthtml');
 	$object->fk_soc = GETPOSTINT('fk_soc');
 	if (lmdbenedisCanReadPowerPlant($user)) {
