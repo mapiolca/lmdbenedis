@@ -45,14 +45,13 @@ header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 
 $state = GETPOST('state', 'aZ09');
-$code = GETPOST('code', 'alphanohtml');
-$usagePointId = GETPOST('usage_point_id', 'aZ09');
+$authorizationId = GETPOST('autorisation_id', 'aZ09');
 $errorCode = GETPOST('error', 'aZ09');
 $result = array('success' => false, 'prm_id' => 0, 'result' => 'invalid_callback');
 
 try {
 	$authorization = new LmdbEnedisAuthorization($db);
-	$result = $authorization->consumeCallback($state, $code, $usagePointId, $errorCode);
+	$result = $authorization->consumeCallback($state, $authorizationId, $errorCode);
 } catch (Throwable $e) {
 	dol_syslog('LMDB Enedis authorization callback failed: '.$e->getMessage(), LOG_ERR);
 	$result = array('success' => false, 'prm_id' => 0, 'result' => 'technical_error');

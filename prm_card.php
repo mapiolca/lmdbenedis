@@ -220,7 +220,7 @@ if ($isCreate || $action === 'edit' || $action === 'add' || ($action === 'update
 	$latestAuthorizationRequest = $authorizationService->getLatestRequest((int) $object->id, (int) $object->entity);
 	if ($latestAuthorizationRequest !== array()) {
 		$requestStatus = $latestAuthorizationRequest['status'];
-		$requestStatusClass = $requestStatus === LmdbEnedisAuthorization::STATUS_GRANTED ? 'badge-status4' : ($requestStatus === LmdbEnedisAuthorization::STATUS_PENDING ? 'badge-status3' : 'badge-status8');
+		$requestStatusClass = $requestStatus === LmdbEnedisAuthorization::STATUS_GRANTED ? 'badge-status4' : (in_array($requestStatus, array(LmdbEnedisAuthorization::STATUS_PENDING, LmdbEnedisAuthorization::STATUS_PROCESSING), true) ? 'badge-status3' : 'badge-status8');
 		$requestStatusKey = 'LmdbEnedisAuthorizationRequest'.ucfirst($requestStatus);
 		print '<tr><td>'.$langs->trans('LmdbEnedisLastAuthorizationRequest').'</td><td colspan="2"><span class="badge '.$requestStatusClass.'">'.$langs->trans($requestStatusKey).'</span>';
 		if ($latestAuthorizationRequest['date_creation'] > 0) {
@@ -230,6 +230,9 @@ if ($isCreate || $action === 'edit' || $action === 'add' || ($action === 'update
 			print ' <span class="opacitymedium">'.dol_escape_htmltag($latestAuthorizationRequest['error_code']).'</span>';
 		}
 		print '</td></tr>';
+	}
+	if (!LmdbEnedisAuthorization::isProductionEnvironment()) {
+		print '<tr><td>'.$langs->trans('LmdbEnedisAuthorization').'</td><td colspan="2"><span class="warning">'.$langs->trans('LmdbEnedisSandboxAuthorizationUnavailable').'</span></td></tr>';
 	}
 	print '<tr><td>'.$langs->trans('LmdbEnedisResources').'</td><td colspan="2">';
 	$resourceOptions = lmdbenedisResourceOptions();

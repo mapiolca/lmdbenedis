@@ -40,7 +40,7 @@ class modLmdbEnedis extends DolibarrModules
 		$this->name = preg_replace('/^mod/i', '', get_class($this));
 		$this->description = 'LmdbEnedisModuleDescription';
 		$this->descriptionlong = 'LmdbEnedisModuleDescriptionLong';
-		$this->version = '1.1.0';
+		$this->version = '1.2.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'fa-bolt';
 		$this->editor_name = 'Les Métiers du Bâtiment';
@@ -66,8 +66,10 @@ class modLmdbEnedis extends DolibarrModules
 			6 => array('LMDBENEDIS_SYNC_LAG_DAYS', 'chaine', '2', 'Safety delay before automatic synchronization', 0, 'current', 1),
 			7 => array('LMDBENEDIS_HTTP_TIMEOUT', 'chaine', '60', 'HTTP response timeout in seconds', 0, 'current', 1),
 			8 => array('LMDBENEDIS_CRON_MAX_PRMS', 'chaine', '50', 'Maximum number of PRMs per cron execution', 0, 'current', 1),
-			9 => array('LMDBENEDIS_AUTHORIZE_URL', 'chaine', 'https://mon-compte-particulier.enedis.fr/dataconnect/v1/oauth2/authorize', 'Data Connect Autorisation V1 URL', 0, 'current', 1),
-			10 => array('LMDBENEDIS_AUTHORIZATION_DURATION', 'chaine', 'P3Y', 'Requested Data Connect authorization duration', 0, 'current', 1),
+			9 => array('LMDBENEDIS_ENVIRONMENT', 'chaine', 'sandbox', 'Data Connect environment', 0, 'current', 1),
+			10 => array('LMDBENEDIS_AUTHORIZE_URL', 'chaine', 'https://mon-compte-particulier.enedis.fr/dataconnect/v2/oauth2/authorize', 'Data Connect 2026 authorization URL', 0, 'current', 1),
+			11 => array('LMDBENEDIS_AUTHORIZATION_DURATION', 'chaine', 'P3Y', 'Requested Data Connect authorization duration', 0, 'current', 1),
+			12 => array('LMDBENEDIS_SUBSCRIBED_SERVICES_URL', 'chaine', 'https://gw.ext.prod.api.enedis.fr/subscribed_services/v1', 'Data Connect Services souscrits V1 URL', 0, 'current', 1),
 		);
 
 		$this->tabs = array();
@@ -147,11 +149,75 @@ class modLmdbEnedis extends DolibarrModules
 		if ($result < 0) {
 			return -1;
 		}
+		if ($this->ensureDatabaseSchema() < 0) {
+			return -1;
+		}
 		if ($this->ensureDatabaseIndexes() < 0) {
 			return -1;
 		}
+		$result = $this->_init($sql, $options);
+		if ($result <= 0) {
+			return $result;
+		}
+		if ($this->migrateDataConnect2026Settings() < 0) {
+			return -1;
+		}
 
-		return $this->_init($sql, $options);
+		return $result;
+	}
+
+	/**
+	 * Add columns introduced after the initial module release.
+	 *
+	 * @return int 1 on success, -1 on error
+	 */
+	private function ensureDatabaseSchema()
+	{
+		$table = MAIN_DB_PREFIX.'lmdbenedis_authorization_request';
+		$sql = 'SHOW COLUMNS FROM '.$table." LIKE 'authorization_id_hash'";
+		$resql = $this->db->query($sql);
+		if (!$resql) {
+			$this->error = $this->db->lasterror();
+			return -1;
+		}
+		$exists = $this->db->num_rows($resql) > 0;
+		$this->db->free($resql);
+		if (!$exists && !$this->db->query('ALTER TABLE '.$table.' ADD authorization_id_hash char(64) AFTER code_hash')) {
+			$this->error = $this->db->lasterror();
+			return -1;
+		}
+
+		return 1;
+	}
+
+	/**
+	 * Migrate only the exact legacy default; preserve every custom endpoint.
+	 *
+	 * @return int 1 on success, -1 on error
+	 */
+	private function migrateDataConnect2026Settings()
+	{
+		global $conf;
+
+		$legacyAuthorizeUrl = 'https://mon-compte-particulier.enedis.fr/dataconnect/v1/oauth2/authorize';
+		if (getDolGlobalString('LMDBENEDIS_AUTHORIZE_URL') !== $legacyAuthorizeUrl) {
+			return 1;
+		}
+		$result = dolibarr_set_const(
+			$this->db,
+			'LMDBENEDIS_AUTHORIZE_URL',
+			'https://mon-compte-particulier.enedis.fr/dataconnect/v2/oauth2/authorize',
+			'chaine',
+			0,
+			'Data Connect 2026 authorization URL',
+			(int) $conf->entity
+		);
+		if ($result <= 0) {
+			$this->error = $this->db->lasterror();
+			return -1;
+		}
+
+		return 1;
 	}
 
 	/**

@@ -34,8 +34,10 @@ $setupUrl = dol_buildpath('/lmdbenedis/admin/setup.php', 1);
 
 if ($action === 'save_settings') {
 	$settings = array(
+		'LMDBENEDIS_ENVIRONMENT' => GETPOST('LMDBENEDIS_ENVIRONMENT', 'aZ09'),
 		'LMDBENEDIS_API_BASE_URL' => rtrim(trim(GETPOST('LMDBENEDIS_API_BASE_URL', 'url')), '/'),
 		'LMDBENEDIS_TOKEN_URL' => trim(GETPOST('LMDBENEDIS_TOKEN_URL', 'url')),
+		'LMDBENEDIS_SUBSCRIBED_SERVICES_URL' => rtrim(trim(GETPOST('LMDBENEDIS_SUBSCRIBED_SERVICES_URL', 'url')), '/'),
 		'LMDBENEDIS_CLIENT_ID' => trim(GETPOST('LMDBENEDIS_CLIENT_ID', 'alphanohtml')),
 		'LMDBENEDIS_AUTHORIZE_URL' => rtrim(trim(GETPOST('LMDBENEDIS_AUTHORIZE_URL', 'url')), '/'),
 		'LMDBENEDIS_AUTHORIZATION_DURATION' => GETPOST('LMDBENEDIS_AUTHORIZATION_DURATION', 'aZ09'),
@@ -47,13 +49,13 @@ if ($action === 'save_settings') {
 	$error = 0;
 	$endpointError = false;
 	try {
-		new LmdbEnedisClient('validation-client', 'validation-secret', $settings['LMDBENEDIS_API_BASE_URL'], $settings['LMDBENEDIS_TOKEN_URL'], (int) $settings['LMDBENEDIS_HTTP_TIMEOUT']);
+		new LmdbEnedisClient('validation-client', 'validation-secret', $settings['LMDBENEDIS_API_BASE_URL'], $settings['LMDBENEDIS_TOKEN_URL'], (int) $settings['LMDBENEDIS_HTTP_TIMEOUT'], $settings['LMDBENEDIS_SUBSCRIBED_SERVICES_URL']);
 	} catch (LmdbEnedisApiException $e) {
 		$error++;
 		$endpointError = true;
 		setEventMessages($langs->trans('LmdbEnedisInvalidEndpoints'), null, 'errors');
 	}
-	if (!LmdbEnedisAuthorization::isAllowedAuthorizeUrl($settings['LMDBENEDIS_AUTHORIZE_URL']) || !isset(LmdbEnedisAuthorization::getDurationOptions()[$settings['LMDBENEDIS_AUTHORIZATION_DURATION']])) {
+	if (!isset(LmdbEnedisAuthorization::getEnvironmentOptions()[$settings['LMDBENEDIS_ENVIRONMENT']]) || !LmdbEnedisAuthorization::isAllowedAuthorizeUrl($settings['LMDBENEDIS_AUTHORIZE_URL']) || !isset(LmdbEnedisAuthorization::getDurationOptions()[$settings['LMDBENEDIS_AUTHORIZATION_DURATION']])) {
 		$error++;
 		$endpointError = true;
 		setEventMessages($langs->trans('LmdbEnedisInvalidAuthorizationSettings'), null, 'errors');
@@ -109,6 +111,10 @@ if ($action === 'test_connection') {
 }
 
 $form = new Form($db);
+$environmentOptions = array();
+foreach (LmdbEnedisAuthorization::getEnvironmentOptions() as $environment => $label) {
+	$environmentOptions[$environment] = $langs->trans('LmdbEnedisEnvironment'.ucfirst($environment));
+}
 $durationOptions = array();
 foreach (LmdbEnedisAuthorization::getDurationOptions() as $duration => $label) {
 	$durationOptions[$duration] = $langs->trans('LmdbEnedisAuthorizationDuration'.$duration);
@@ -136,11 +142,16 @@ print '<input type="hidden" name="token" value="'.newToken().'">';
 print '<input type="hidden" name="action" value="save_settings">';
 print '<table class="noborder centpercent">';
 print '<tr class="liste_titre"><td colspan="2">'.$langs->trans('LmdbEnedisConnectionSettings').'</td></tr>';
-print '<tr class="oddeven"><td class="titlefield">'.$langs->trans('LmdbEnedisApiBaseUrl').'</td><td><input class="flat minwidth500" name="LMDBENEDIS_API_BASE_URL" value="'.dol_escape_htmltag(getDolGlobalString('LMDBENEDIS_API_BASE_URL')).'"></td></tr>';
+print '<tr class="oddeven"><td class="titlefield">'.$langs->trans('LmdbEnedisEnvironment').'</td><td>'.$form->selectarray('LMDBENEDIS_ENVIRONMENT', $environmentOptions, getDolGlobalString('LMDBENEDIS_ENVIRONMENT', 'sandbox'), 0, 0, 0, '', 0, 0, 0, '', 'minwidth200').'<br><span class="opacitymedium">'.$langs->trans('LmdbEnedisEnvironmentHelp').'</span></td></tr>';
+print '<tr class="oddeven"><td>'.$langs->trans('LmdbEnedisApiBaseUrl').'</td><td><input class="flat minwidth500" name="LMDBENEDIS_API_BASE_URL" value="'.dol_escape_htmltag(getDolGlobalString('LMDBENEDIS_API_BASE_URL')).'"></td></tr>';
 print '<tr class="oddeven"><td>'.$langs->trans('LmdbEnedisTokenUrl').'</td><td><input class="flat minwidth500" name="LMDBENEDIS_TOKEN_URL" value="'.dol_escape_htmltag(getDolGlobalString('LMDBENEDIS_TOKEN_URL')).'"></td></tr>';
+print '<tr class="oddeven"><td>'.$langs->trans('LmdbEnedisSubscribedServicesUrl').'</td><td><input class="flat minwidth500" name="LMDBENEDIS_SUBSCRIBED_SERVICES_URL" value="'.dol_escape_htmltag(getDolGlobalString('LMDBENEDIS_SUBSCRIBED_SERVICES_URL', 'https://gw.ext.prod.api.enedis.fr/subscribed_services/v1')).'"></td></tr>';
 print '<tr class="oddeven"><td>'.$langs->trans('LmdbEnedisClientId').'</td><td><input class="flat minwidth300" autocomplete="off" name="LMDBENEDIS_CLIENT_ID" value="'.dol_escape_htmltag(getDolGlobalString('LMDBENEDIS_CLIENT_ID')).'"></td></tr>';
 print '<tr class="oddeven"><td>'.$langs->trans('LmdbEnedisClientSecret').'</td><td><input class="flat minwidth300" type="password" autocomplete="new-password" name="LMDBENEDIS_CLIENT_SECRET" value="" placeholder="'.(LmdbEnedisConfig::getClientSecret() !== '' ? dol_escape_htmltag($langs->trans('LmdbEnedisSecretAlreadySaved')) : '').'"></td></tr>';
 print '<tr class="liste_titre"><td colspan="2">'.$langs->trans('LmdbEnedisAuthorizationSettings').'</td></tr>';
+if (!LmdbEnedisAuthorization::isProductionEnvironment()) {
+	print '<tr class="oddeven"><td colspan="2"><div class="warning">'.$langs->trans('LmdbEnedisSandboxAuthorizationUnavailable').'</div></td></tr>';
+}
 print '<tr class="oddeven"><td>'.$langs->trans('LmdbEnedisAuthorizeUrl').'</td><td><input class="flat minwidth500" name="LMDBENEDIS_AUTHORIZE_URL" value="'.dol_escape_htmltag(getDolGlobalString('LMDBENEDIS_AUTHORIZE_URL')).'"></td></tr>';
 print '<tr class="oddeven"><td>'.$langs->trans('LmdbEnedisAuthorizationDuration').'</td><td>'.$form->selectarray('LMDBENEDIS_AUTHORIZATION_DURATION', $durationOptions, getDolGlobalString('LMDBENEDIS_AUTHORIZATION_DURATION', 'P3Y'), 0, 0, 0, '', 0, 0, 0, '', 'minwidth200').'</td></tr>';
 print '<tr class="oddeven"><td>'.$langs->trans('LmdbEnedisAuthorizationCallbackUrl').'</td><td><code>'.dol_escape_htmltag($callbackUrl).'</code><br><span class="opacitymedium">'.$langs->trans('LmdbEnedisAuthorizationCallbackHelp').'</span>';

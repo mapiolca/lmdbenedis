@@ -183,7 +183,7 @@ class LmdbEnedisPrm extends CommonObject
 	/**
 	 * Apply an authorization returned by the official Enedis callback.
 	 *
-	 * @param string $reference         One-way authorization-code fingerprint
+	 * @param string $reference         One-way autorisation_id fingerprint
 	 * @param int    $authorizationEnd  Authorization end timestamp
 	 * @param User   $user              User who initiated the request
 	 * @param int    $notrigger         Disable trigger

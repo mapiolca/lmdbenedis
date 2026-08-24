@@ -31,7 +31,7 @@ class LmdbEnedisApiException extends RuntimeException
 }
 
 /**
- * OAuth2 and Mesures V1 HTTP client.
+ * OAuth2, Services souscrits V1 and Mesures V1 HTTP client.
  *
  * This class deliberately uses an isolated cURL call instead of getURLContent():
  * the native helper logs outgoing headers and would therefore expose Basic and
@@ -55,6 +55,8 @@ class LmdbEnedisClient
 	private $apiBaseUrl;
 	/** @var string */
 	private $tokenUrl;
+	/** @var string */
+	private $subscribedServicesUrl;
 	/** @var int */
 	private $timeout;
 	/** @var string */
@@ -70,16 +72,19 @@ class LmdbEnedisClient
 	 * @param string $apiBaseUrl   Optional injected Mesures V1 URL
 	 * @param string $tokenUrl     Optional injected OAuth2 URL
 	 * @param int    $timeout      Optional injected timeout
+	 * @param string $subscribedServicesUrl Optional injected Services souscrits V1 URL
 	 */
-	public function __construct($clientId = '', $clientSecret = '', $apiBaseUrl = '', $tokenUrl = '', $timeout = 0)
+	public function __construct($clientId = '', $clientSecret = '', $apiBaseUrl = '', $tokenUrl = '', $timeout = 0, $subscribedServicesUrl = '')
 	{
 		$this->clientId = $clientId !== '' ? $clientId : getDolGlobalString('LMDBENEDIS_CLIENT_ID');
 		$this->clientSecret = $clientSecret !== '' ? $clientSecret : LmdbEnedisConfig::getClientSecret();
 		$this->apiBaseUrl = rtrim($apiBaseUrl !== '' ? $apiBaseUrl : getDolGlobalString('LMDBENEDIS_API_BASE_URL'), '/');
 		$this->tokenUrl = $tokenUrl !== '' ? $tokenUrl : getDolGlobalString('LMDBENEDIS_TOKEN_URL');
+		$this->subscribedServicesUrl = rtrim($subscribedServicesUrl !== '' ? $subscribedServicesUrl : getDolGlobalString('LMDBENEDIS_SUBSCRIBED_SERVICES_URL', 'https://gw.ext.prod.api.enedis.fr/subscribed_services/v1'), '/');
 		$this->timeout = $timeout > 0 ? $timeout : max(5, getDolGlobalInt('LMDBENEDIS_HTTP_TIMEOUT', 60));
 		$this->assertAllowedEnedisUrl($this->apiBaseUrl);
 		$this->assertAllowedEnedisUrl($this->tokenUrl);
+		$this->assertAllowedEnedisUrl($this->subscribedServicesUrl);
 	}
 
 	/**
@@ -111,6 +116,112 @@ class LmdbEnedisClient
 		$this->getAccessToken(true);
 
 		return true;
+	}
+
+	/**
+	 * Resolve the single PRM linked to an Autorisation v2 callback identifier.
+	 *
+	 * @param string $authorizationId Enedis autorisation_id, int64 rendered as digits
+	 * @return string PRM, exactly 14 digits
+	 * @throws LmdbEnedisApiException
+	 */
+	public function fetchAuthorizedUsagePointId($authorizationId)
+	{
+		$authorizationId = self::normalizeAuthorizationId($authorizationId);
+		$payload = json_encode(array(
+			'autorisationId' => (int) $authorizationId,
+			'comptage' => false,
+			'etatCode' => array('ACTIF', 'DEMANDE'),
+			'serviceType' => 'ACCES',
+			'autorisation' => true,
+		), JSON_UNESCAPED_SLASHES);
+		if (!is_string($payload)) {
+			throw new LmdbEnedisApiException('Unable to encode the Services souscrits V1 request');
+		}
+
+		$token = $this->getAccessToken(false);
+		$response = $this->request('POST', $this->subscribedServicesUrl, $payload, array(
+			'Accept: application/json',
+			'Content-Type: application/json;charset=UTF-8',
+			'Authorization: Bearer '.$token,
+		));
+		if ($response['status'] === 401) {
+			$token = $this->getAccessToken(true);
+			$response = $this->request('POST', $this->subscribedServicesUrl, $payload, array(
+				'Accept: application/json',
+				'Content-Type: application/json;charset=UTF-8',
+				'Authorization: Bearer '.$token,
+			));
+		}
+
+		return self::extractUsagePointIdFromSubscribedServices($this->decodeSuccessfulResponse($response), $authorizationId);
+	}
+
+	/**
+	 * Validate the int64 identifier without losing precision before JSON encoding.
+	 *
+	 * @param string $authorizationId Raw callback value
+	 * @return string Normalized digits
+	 * @throws LmdbEnedisApiException
+	 */
+	public static function normalizeAuthorizationId($authorizationId)
+	{
+		$authorizationId = trim((string) $authorizationId);
+		if (!preg_match('/^[1-9][0-9]{0,18}$/D', $authorizationId)) {
+			throw new LmdbEnedisApiException('Invalid Enedis authorization identifier');
+		}
+		$maximum = (string) PHP_INT_MAX;
+		if (strlen($authorizationId) > strlen($maximum) || (strlen($authorizationId) === strlen($maximum) && strcmp($authorizationId, $maximum) > 0)) {
+			throw new LmdbEnedisApiException('Enedis authorization identifier exceeds the supported int64 range');
+		}
+
+		return $authorizationId;
+	}
+
+	/**
+	 * Extract one unambiguous PRM from the official Services souscrits response.
+	 *
+	 * @param array<string,mixed> $data Response payload
+	 * @param string $authorizationId Requested authorization identifier
+	 * @return string PRM, exactly 14 digits
+	 * @throws LmdbEnedisApiException
+	 */
+	public static function extractUsagePointIdFromSubscribedServices($data, $authorizationId)
+	{
+		$authorizationId = self::normalizeAuthorizationId($authorizationId);
+		if (!isset($data['serviceSouscrit']) || !is_array($data['serviceSouscrit'])) {
+			throw new LmdbEnedisApiException('Services souscrits V1 response does not contain a service list');
+		}
+
+		$usagePointIds = array();
+		foreach ($data['serviceSouscrit'] as $service) {
+			if (!is_array($service)) {
+				continue;
+			}
+			if (!isset($service['serviceCode']) || (string) $service['serviceCode'] !== 'ACCES') {
+				continue;
+			}
+			if (!isset($service['etatCode']) || !in_array((string) $service['etatCode'], array('ACTIF', 'DEMANDE'), true)) {
+				continue;
+			}
+			if (!isset($service['autorisation']) || !is_array($service['autorisation']) || !isset($service['autorisation']['autorisationId'])) {
+				continue;
+			}
+			$returnedAuthorizationId = trim((string) $service['autorisation']['autorisationId']);
+			if (!hash_equals($authorizationId, $returnedAuthorizationId)) {
+				continue;
+			}
+			$usagePointId = isset($service['pointId']) ? trim((string) $service['pointId']) : '';
+			if (preg_match('/^[0-9]{14}$/D', $usagePointId)) {
+				$usagePointIds[$usagePointId] = true;
+			}
+		}
+
+		if (count($usagePointIds) !== 1) {
+			throw new LmdbEnedisApiException('Services souscrits V1 did not return one unambiguous usage point');
+		}
+
+		return (string) array_key_first($usagePointIds);
 	}
 
 	/**

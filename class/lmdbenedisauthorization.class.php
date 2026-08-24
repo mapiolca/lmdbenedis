@@ -1,16 +1,21 @@
 <?php
 /* Copyright (C) 2026 Pierre Ardoin <developpeur@lesmetiersdubatiment.fr> */
 
+require_once __DIR__.'/lmdbenedisconfig.class.php';
+require_once __DIR__.'/lmdbenedisclient.class.php';
+
 /**
- * Enedis Data Connect Autorisation V1 request service.
+ * Enedis Data Connect 2026 authorization request service.
  *
- * The OAuth state and returned authorization code are never persisted in
- * clear text. A request is short-lived, one-time and bound to one PRM and one
- * Dolibarr entity before the customer is redirected to Enedis.
+ * The OAuth state and returned autorisation_id are never persisted in clear
+ * text. A request is short-lived, one-time and bound to one PRM and one
+ * Dolibarr entity before the customer is redirected to Enedis. The PRM is
+ * resolved from Services souscrits V1 before the authorization is accepted.
  */
 class LmdbEnedisAuthorization
 {
 	public const STATUS_PENDING = 'pending';
+	public const STATUS_PROCESSING = 'processing';
 	public const STATUS_GRANTED = 'granted';
 	public const STATUS_FAILED = 'failed';
 	public const STATUS_EXPIRED = 'expired';
@@ -27,6 +32,8 @@ class LmdbEnedisAuthorization
 	/** @var string */
 	private $callbackUrl;
 	/** @var string */
+	private $environment;
+	/** @var string */
 	public $error = '';
 	/** @var array<int,string> */
 	public $errors = array();
@@ -34,17 +41,38 @@ class LmdbEnedisAuthorization
 	/**
 	 * @param DoliDB|null $db           Database handler
 	 * @param string      $clientId     Optional injected client ID
-	 * @param string      $authorizeUrl Optional injected Autorisation V1 URL
+	 * @param string      $authorizeUrl Optional injected Autorisation v2 URL
 	 * @param string      $duration     Optional injected ISO 8601 duration
 	 * @param string      $callbackUrl  Optional injected public callback URL
+	 * @param string      $environment  Optional injected sandbox/production mode
 	 */
-	public function __construct($db, $clientId = '', $authorizeUrl = '', $duration = '', $callbackUrl = '')
+	public function __construct($db, $clientId = '', $authorizeUrl = '', $duration = '', $callbackUrl = '', $environment = '')
 	{
 		$this->db = $db;
 		$this->clientId = $clientId !== '' ? $clientId : (function_exists('getDolGlobalString') ? getDolGlobalString('LMDBENEDIS_CLIENT_ID') : '');
 		$this->authorizeUrl = $authorizeUrl !== '' ? $authorizeUrl : (function_exists('getDolGlobalString') ? getDolGlobalString('LMDBENEDIS_AUTHORIZE_URL') : '');
 		$this->duration = $duration !== '' ? $duration : (function_exists('getDolGlobalString') ? getDolGlobalString('LMDBENEDIS_AUTHORIZATION_DURATION', 'P3Y') : 'P3Y');
 		$this->callbackUrl = $callbackUrl !== '' ? $callbackUrl : self::getCallbackUrl();
+		$this->environment = $environment !== '' ? $environment : (function_exists('getDolGlobalString') ? getDolGlobalString('LMDBENEDIS_ENVIRONMENT', 'sandbox') : 'sandbox');
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	public static function getEnvironmentOptions()
+	{
+		return array(
+			'sandbox' => 'Sandbox',
+			'production' => 'Production',
+		);
+	}
+
+	/**
+	 * @return bool
+	 */
+	public static function isProductionEnvironment()
+	{
+		return function_exists('getDolGlobalString') && getDolGlobalString('LMDBENEDIS_ENVIRONMENT', 'sandbox') === 'production';
 	}
 
 	/**
@@ -77,8 +105,16 @@ class LmdbEnedisAuthorization
 	public static function isConfigured()
 	{
 		try {
+			if (!function_exists('curl_init')) {
+				return false;
+			}
 			$service = new self(null);
 			$service->validateConfiguration();
+			if (!LmdbEnedisConfig::isAuthorizationConnectionConfigured()) {
+				return false;
+			}
+			new LmdbEnedisClient();
+
 			return true;
 		} catch (Throwable $e) {
 			return false;
@@ -86,7 +122,7 @@ class LmdbEnedisAuthorization
 	}
 
 	/**
-	 * Restrict the browser redirect to the official Autorisation V1 endpoint.
+	 * Restrict the browser redirect to the official Data Connect 2026 endpoint.
 	 *
 	 * @param string $url URL
 	 * @return bool
@@ -98,7 +134,7 @@ class LmdbEnedisAuthorization
 			&& strtolower((string) ($parts['scheme'] ?? '')) === 'https'
 			&& strtolower((string) ($parts['host'] ?? '')) === 'mon-compte-particulier.enedis.fr'
 			&& (int) ($parts['port'] ?? 443) === 443
-			&& (string) ($parts['path'] ?? '') === '/dataconnect/v1/oauth2/authorize'
+			&& (string) ($parts['path'] ?? '') === '/dataconnect/v2/oauth2/authorize'
 			&& empty($parts['user'])
 			&& empty($parts['pass'])
 			&& empty($parts['query'])
@@ -122,8 +158,7 @@ class LmdbEnedisAuthorization
 	}
 
 	/**
-	 * Generate a high-entropy OAuth2 state. The final digit also remains
-	 * compatible with the scenario selector documented for the Enedis sandbox.
+	 * Generate a high-entropy OAuth2 state.
 	 *
 	 * @param int $entity Entity ID encoded for the public Multicompany callback
 	 * @return string
@@ -168,6 +203,10 @@ class LmdbEnedisAuthorization
 		global $conf;
 
 		$this->validateConfiguration();
+		if (!function_exists('curl_init') || !LmdbEnedisConfig::isAuthorizationConnectionConfigured()) {
+			throw new RuntimeException('Enedis Services souscrits V1 connection is not configured');
+		}
+		new LmdbEnedisClient();
 		if (!is_object($this->db) || !is_object($prm) || (int) $prm->id <= 0 || (int) $prm->entity !== (int) $conf->entity || !is_object($user) || (int) $user->id <= 0) {
 			throw new RuntimeException('Invalid authorization request context');
 		}
@@ -178,7 +217,7 @@ class LmdbEnedisAuthorization
 
 		$this->db->begin();
 		$sql = 'UPDATE '.MAIN_DB_PREFIX."lmdbenedis_authorization_request SET status = '".self::STATUS_CANCELLED."', fk_user_modif = ".((int) $user->id);
-		$sql .= ' WHERE entity = '.((int) $conf->entity).' AND fk_prm = '.((int) $prm->id)." AND status = '".self::STATUS_PENDING."'";
+		$sql .= ' WHERE entity = '.((int) $conf->entity).' AND fk_prm = '.((int) $prm->id)." AND status IN ('".self::STATUS_PENDING."', '".self::STATUS_PROCESSING."')";
 		if (!$this->db->query($sql)) {
 			$this->db->rollback();
 			throw new RuntimeException($this->db->lasterror());
@@ -199,16 +238,20 @@ class LmdbEnedisAuthorization
 	 * Consume the Enedis callback exactly once.
 	 *
 	 * @param string $state            OAuth2 state
-	 * @param string $code             Authorization code
-	 * @param string $usagePointId     Returned PRM
+	 * @param string $authorizationId  Returned autorisation_id
 	 * @param string $errorCode        Optional Enedis error code
 	 * @return array{success:bool,prm_id:int,result:string}
 	 */
-	public function consumeCallback($state, $code, $usagePointId, $errorCode = '')
+	public function consumeCallback($state, $authorizationId, $errorCode = '')
 	{
 		global $conf;
 
 		if (function_exists('isModEnabled') && !isModEnabled('lmdbenedis')) {
+			return array('success' => false, 'prm_id' => 0, 'result' => 'feature_unavailable');
+		}
+		try {
+			$this->validateConfiguration();
+		} catch (Throwable $e) {
 			return array('success' => false, 'prm_id' => 0, 'result' => 'feature_unavailable');
 		}
 		if (!is_object($this->db) || !preg_match('/^[0-9]{10}[a-f0-9]{63}[0-9]$/D', $state)) {
@@ -233,29 +276,65 @@ class LmdbEnedisAuthorization
 			$this->db->rollback();
 			return array('success' => false, 'prm_id' => 0, 'result' => 'invalid_state');
 		}
-		if ((string) $request->status === self::STATUS_GRANTED) {
-			$this->db->rollback();
-			return array('success' => false, 'prm_id' => 0, 'result' => 'already_processed');
-		}
 		if ((string) $request->status !== self::STATUS_PENDING) {
 			$this->db->rollback();
 			return array('success' => false, 'prm_id' => 0, 'result' => 'already_processed');
 		}
 		$expiresAt = $this->db->jdate((string) $request->expires_at);
 		if ($expiresAt <= 0 || $expiresAt < dol_now()) {
-			$this->setRequestFailure((int) $request->rowid, self::STATUS_EXPIRED, 'expired');
+			$this->setRequestFailure((int) $request->rowid, self::STATUS_EXPIRED, 'expired', self::STATUS_PENDING);
 			$this->db->commit();
 			return array('success' => false, 'prm_id' => 0, 'result' => 'expired');
 		}
 		if ($errorCode !== '') {
-			$this->setRequestFailure((int) $request->rowid, self::STATUS_FAILED, $errorCode);
+			$this->setRequestFailure((int) $request->rowid, self::STATUS_FAILED, $errorCode, self::STATUS_PENDING);
 			$this->db->commit();
 			return array('success' => false, 'prm_id' => 0, 'result' => 'denied');
 		}
-		if (!preg_match('/^[A-Za-z0-9._~-]{1,512}$/D', $code) || !preg_match('/^[0-9]{14}$/D', $usagePointId)) {
-			$this->setRequestFailure((int) $request->rowid, self::STATUS_FAILED, 'invalid_callback');
+
+		try {
+			$authorizationId = LmdbEnedisClient::normalizeAuthorizationId($authorizationId);
+		} catch (LmdbEnedisApiException $e) {
+			$this->setRequestFailure((int) $request->rowid, self::STATUS_FAILED, 'invalid_callback', self::STATUS_PENDING);
 			$this->db->commit();
 			return array('success' => false, 'prm_id' => 0, 'result' => 'invalid_callback');
+		}
+		$authorizationIdHash = hash('sha256', $authorizationId);
+		$sql = 'UPDATE '.MAIN_DB_PREFIX."lmdbenedis_authorization_request SET status = '".self::STATUS_PROCESSING."', authorization_id_hash = '".$this->db->escape($authorizationIdHash)."'";
+		$sql .= ' WHERE rowid = '.((int) $request->rowid).' AND entity = '.((int) $request->entity)." AND status = '".self::STATUS_PENDING."'";
+		if (!$this->db->query($sql)) {
+			$this->db->rollback();
+			throw new RuntimeException($this->db->lasterror());
+		}
+		$this->db->commit();
+
+		try {
+			$client = new LmdbEnedisClient();
+			$usagePointId = $client->fetchAuthorizedUsagePointId($authorizationId);
+		} catch (Throwable $e) {
+			$this->db->begin();
+			$this->setRequestFailure((int) $request->rowid, self::STATUS_FAILED, 'subscribed_services_error', self::STATUS_PROCESSING);
+			$this->db->commit();
+			$httpStatus = $e instanceof LmdbEnedisApiException ? $e->getHttpStatus() : 0;
+			dol_syslog('LMDB Enedis Services souscrits resolution failed with HTTP status '.((int) $httpStatus), LOG_ERR);
+
+			return array('success' => false, 'prm_id' => 0, 'result' => 'technical_error');
+		}
+
+		$this->db->begin();
+		$sql = 'SELECT rowid, entity, fk_prm, duration, status, authorization_id_hash, fk_user_creat FROM '.MAIN_DB_PREFIX.'lmdbenedis_authorization_request';
+		$sql .= ' WHERE rowid = '.((int) $request->rowid).' AND entity = '.((int) $request->entity).' FOR UPDATE';
+		$resql = $this->db->query($sql);
+		if (!$resql) {
+			$this->db->rollback();
+			throw new RuntimeException($this->db->lasterror());
+		}
+		$request = $this->db->fetch_object($resql);
+		$this->db->free($resql);
+		if (!is_object($request) || (string) $request->status !== self::STATUS_PROCESSING || !hash_equals((string) $request->authorization_id_hash, $authorizationIdHash)) {
+			$this->db->rollback();
+
+			return array('success' => false, 'prm_id' => 0, 'result' => 'already_processed');
 		}
 
 		require_once DOL_DOCUMENT_ROOT.'/user/class/user.class.php';
@@ -263,24 +342,24 @@ class LmdbEnedisAuthorization
 		require_once __DIR__.'/../lib/lmdbenedis_access.lib.php';
 		$user = new User($this->db);
 		if ($user->fetch((int) $request->fk_user_creat) <= 0) {
-			$this->setRequestFailure((int) $request->rowid, self::STATUS_FAILED, 'requesting_user_not_found');
+			$this->setRequestFailure((int) $request->rowid, self::STATUS_FAILED, 'requesting_user_not_found', self::STATUS_PROCESSING);
 			$this->db->commit();
 			return array('success' => false, 'prm_id' => 0, 'result' => 'requesting_user_unauthorized');
 		}
 		$prm = new LmdbEnedisPrm($this->db);
 		if ($prm->fetchForEntity((int) $request->fk_prm, (int) $request->entity) <= 0) {
-			$this->setRequestFailure((int) $request->rowid, self::STATUS_FAILED, 'prm_not_found');
+			$this->setRequestFailure((int) $request->rowid, self::STATUS_FAILED, 'prm_not_found', self::STATUS_PROCESSING);
 			$this->db->commit();
 			return array('success' => false, 'prm_id' => 0, 'result' => 'prm_not_found');
 		}
 		if (!hash_equals($prm->usage_point_id, $usagePointId)) {
-			$this->setRequestFailure((int) $request->rowid, self::STATUS_FAILED, 'prm_mismatch');
+			$this->setRequestFailure((int) $request->rowid, self::STATUS_FAILED, 'prm_mismatch', self::STATUS_PROCESSING);
 			$this->db->commit();
 			return array('success' => false, 'prm_id' => 0, 'result' => 'prm_mismatch');
 		}
 		$user->loadRights();
 		if (empty($user->statut) || !lmdbenedisCanDo($user, 'prm', 'write', $prm)) {
-			$this->setRequestFailure((int) $request->rowid, self::STATUS_FAILED, 'requesting_user_unauthorized');
+			$this->setRequestFailure((int) $request->rowid, self::STATUS_FAILED, 'requesting_user_unauthorized', self::STATUS_PROCESSING);
 			$this->db->commit();
 			return array('success' => false, 'prm_id' => 0, 'result' => 'requesting_user_unauthorized');
 		}
@@ -288,21 +367,23 @@ class LmdbEnedisAuthorization
 		$oldEntity = (int) $conf->entity;
 		$conf->entity = (int) $request->entity;
 		try {
-			$codeHash = hash('sha256', $code);
-			$reference = 'sha256:'.$codeHash;
+			$reference = 'sha256:'.$authorizationIdHash;
 			$authorizationEnd = self::calculateAuthorizationEnd((string) $request->duration, dol_now());
 			if ($prm->applyAuthorization($reference, $authorizationEnd, $user, 0, 0) <= 0) {
 				throw new RuntimeException($prm->error !== '' ? $prm->error : 'Unable to update the PRM authorization');
 			}
 			$sql = 'UPDATE '.MAIN_DB_PREFIX."lmdbenedis_authorization_request SET status = '".self::STATUS_GRANTED."', usage_point_id = '".$this->db->escape($usagePointId)."', ";
-			$sql .= "code_hash = '".$this->db->escape($codeHash)."', completed_at = '".$this->db->idate(dol_now())."', fk_user_modif = ".((int) $user->id);
-			$sql .= ' WHERE rowid = '.((int) $request->rowid).' AND entity = '.((int) $request->entity);
+			$sql .= "authorization_id_hash = '".$this->db->escape($authorizationIdHash)."', completed_at = '".$this->db->idate(dol_now())."', fk_user_modif = ".((int) $user->id);
+			$sql .= ' WHERE rowid = '.((int) $request->rowid).' AND entity = '.((int) $request->entity)." AND status = '".self::STATUS_PROCESSING."'";
 			if (!$this->db->query($sql)) {
 				throw new RuntimeException($this->db->lasterror());
 			}
 			$this->db->commit();
 		} catch (Throwable $e) {
 			$this->db->rollback();
+			$this->db->begin();
+			$this->setRequestFailure((int) $request->rowid, self::STATUS_FAILED, 'processing_error', self::STATUS_PROCESSING);
+			$this->db->commit();
 			throw $e;
 		} finally {
 			$conf->entity = $oldEntity;
@@ -364,8 +445,8 @@ class LmdbEnedisAuthorization
 	/** @return void */
 	private function validateConfiguration()
 	{
-		if ($this->clientId === '' || !self::isAllowedAuthorizeUrl($this->authorizeUrl) || !isset(self::getDurationOptions()[$this->duration]) || !self::isAllowedCallbackUrl($this->callbackUrl)) {
-			throw new RuntimeException('Enedis Autorisation V1 is not configured or the public callback is not HTTPS');
+		if ($this->environment !== 'production' || $this->clientId === '' || !self::isAllowedAuthorizeUrl($this->authorizeUrl) || !isset(self::getDurationOptions()[$this->duration]) || !self::isAllowedCallbackUrl($this->callbackUrl)) {
+			throw new RuntimeException('Enedis Data Connect 2026 production authorization is not configured or the public callback is not HTTPS');
 		}
 	}
 
@@ -373,13 +454,17 @@ class LmdbEnedisAuthorization
 	 * @param int    $requestId   Request ID
 	 * @param string $status      Terminal status
 	 * @param string $errorCode   Error code
+	 * @param string $expectedStatus Current status required before the update
 	 * @return void
 	 */
-	private function setRequestFailure($requestId, $status, $errorCode)
+	private function setRequestFailure($requestId, $status, $errorCode, $expectedStatus = '')
 	{
 		$errorCode = substr($errorCode, 0, 64);
 		$sql = 'UPDATE '.MAIN_DB_PREFIX."lmdbenedis_authorization_request SET status = '".$this->db->escape($status)."', error_code = '".$this->db->escape($errorCode)."', ";
 		$sql .= "completed_at = '".$this->db->idate(dol_now())."' WHERE rowid = ".((int) $requestId);
+		if ($expectedStatus !== '') {
+			$sql .= " AND status = '".$this->db->escape($expectedStatus)."'";
+		}
 		if (!$this->db->query($sql)) {
 			throw new RuntimeException($this->db->lasterror());
 		}

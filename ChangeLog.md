@@ -1,5 +1,13 @@
 # Historique des versions
 
+## 1.2.0 — 2026-08-25
+
+- Migration de l’autorisation vers le parcours Data Connect 2026 `/dataconnect/v2/oauth2/authorize` et son callback `autorisation_id`.
+- Ajout de la résolution obligatoire du PRM par Services souscrits V1, avec refus des réponses absentes, incohérentes ou portant plusieurs PRM.
+- Séparation explicite des modes bac à sable et production ; le consentement réel reste indisponible tant que l’URL de retour n’a pas été enregistrée par Enedis.
+- Migration idempotente de l’ancienne URL d’autorisation par défaut et ajout conservateur de l’empreinte d’identifiant d’autorisation en base.
+- Renforcement de l’anti-rejeu avec un état de traitement atomique et aucun appel réseau conservé dans une transaction SQL longue.
+
 ## 1.1.0 — 2026-08-25
 
 - Ajout du parcours Autorisation V1 depuis une fiche PRM, avec redirection vers le compte du titulaire et callback public HTTPS.

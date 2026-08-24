@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS llx_lmdbenedis_authorization_request(
 	status varchar(16) DEFAULT 'pending' NOT NULL,
 	usage_point_id varchar(14),
 	code_hash char(64),
+	authorization_id_hash char(64),
 	expires_at datetime NOT NULL,
 	completed_at datetime,
 	error_code varchar(64),

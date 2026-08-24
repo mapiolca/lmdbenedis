@@ -3,14 +3,14 @@
 
 require_once __DIR__.'/../class/lmdbenedisauthorization.class.php';
 
-$authorizeUrl = 'https://mon-compte-particulier.enedis.fr/dataconnect/v1/oauth2/authorize';
+$authorizeUrl = 'https://mon-compte-particulier.enedis.fr/dataconnect/v2/oauth2/authorize';
 $callbackUrl = 'https://erp.example.test/custom/lmdbenedis/authorization_callback.php';
 $state = '0000000001'.str_repeat('a', 63).'0';
-$service = new LmdbEnedisAuthorization(null, 'client-id', $authorizeUrl, 'P3Y', $callbackUrl);
+$service = new LmdbEnedisAuthorization(null, 'client-id', $authorizeUrl, 'P3Y', $callbackUrl, 'production');
 $url = $service->buildAuthorizationUrl($state);
 $query = array();
 parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
-if (($query['client_id'] ?? '') !== 'client-id' || ($query['response_type'] ?? '') !== 'code' || ($query['state'] ?? '') !== $state || ($query['duration'] ?? '') !== 'P3Y') {
+if (count($query) !== 4 || ($query['client_id'] ?? '') !== 'client-id' || ($query['response_type'] ?? '') !== 'code' || ($query['state'] ?? '') !== $state || ($query['duration'] ?? '') !== 'P3Y' || isset($query['redirect_uri'])) {
 	fwrite(STDERR, "Authorization URL test failed\n");
 	exit(1);
 }
@@ -23,9 +23,21 @@ if (!preg_match('/^0000000042[a-f0-9]{63}[0-9]$/D', $generatedState)) {
 
 if (!LmdbEnedisAuthorization::isAllowedAuthorizeUrl($authorizeUrl)
 	|| LmdbEnedisAuthorization::isAllowedAuthorizeUrl('https://example.test/dataconnect/v1/oauth2/authorize')
+	|| LmdbEnedisAuthorization::isAllowedAuthorizeUrl('https://mon-compte-particulier.enedis.fr/dataconnect/v1/oauth2/authorize')
 	|| !LmdbEnedisAuthorization::isAllowedCallbackUrl($callbackUrl)
 	|| LmdbEnedisAuthorization::isAllowedCallbackUrl('http://erp.example.test/callback')) {
 	fwrite(STDERR, "Authorization endpoint allowlist test failed\n");
+	exit(1);
+}
+
+$sandboxRejected = false;
+try {
+	(new LmdbEnedisAuthorization(null, 'client-id', $authorizeUrl, 'P3Y', $callbackUrl, 'sandbox'))->buildAuthorizationUrl($state);
+} catch (RuntimeException $e) {
+	$sandboxRejected = true;
+}
+if (!$sandboxRejected) {
+	fwrite(STDERR, "Sandbox authorization test failed\n");
 	exit(1);
 }
 

@@ -60,6 +60,17 @@ class LmdbEnedisConfig
 	}
 
 	/**
+	 * Check the additional endpoint required by the authorization callback.
+	 *
+	 * @return bool
+	 */
+	public static function isAuthorizationConnectionConfigured()
+	{
+		return self::isConnectionConfigured()
+			&& getDolGlobalString('LMDBENEDIS_SUBSCRIBED_SERVICES_URL', 'https://gw.ext.prod.api.enedis.fr/subscribed_services/v1') !== '';
+	}
+
+	/**
 	 * Load the native encryption functions on every supported Dolibarr version.
 	 *
 	 * Dolibarr v20 exposes them from core/lib/security.lib.php, while recent

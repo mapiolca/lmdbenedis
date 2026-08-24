@@ -20,6 +20,7 @@ class LmdbEnedisCompatibility
 		$curlOk = function_exists('curl_init');
 		$configured = LmdbEnedisConfig::isConnectionConfigured();
 		$cronEnabled = isModEnabled('cron');
+		$productionEnvironment = LmdbEnedisAuthorization::isProductionEnvironment();
 		$authorizationConfigured = LmdbEnedisAuthorization::isConfigured();
 		$endpointsOk = false;
 		if ($configured) {
@@ -32,16 +33,16 @@ class LmdbEnedisCompatibility
 		}
 
 		return array(
-			'authorization_v1' => array(
-				'label' => 'LmdbEnedisFeatureAuthorizationV1',
-				'description' => 'LmdbEnedisFeatureAuthorizationV1Description',
+			'authorization_2026' => array(
+				'label' => 'LmdbEnedisFeatureAuthorization2026',
+				'description' => 'LmdbEnedisFeatureAuthorization2026Description',
 				'min_dolibarr' => '20.0.0',
 				'core_available_from' => '20.0.0',
 				'module_available_from' => '20.0.0',
 				'min_php' => '8.0.0',
-				'compatibility_check' => "version_compare(DOL_VERSION, '20.0.0', '>=') && PHP_VERSION >= 8.0.0 && authorization_url_valid && callback_url_https",
+				'compatibility_check' => "version_compare(DOL_VERSION, '20.0.0', '>=') && PHP_VERSION >= 8.0.0 && extension_loaded('curl') && environment == production && authorize_v2_url_valid && subscribed_services_v1_configured && callback_url_https",
 				'available' => $dolibarrOk && $phpOk && $authorizationConfigured,
-				'reason' => !$dolibarrOk ? 'LmdbEnedisRequiresDolibarr20' : (!$phpOk ? 'LmdbEnedisRequiresPhp80' : ($authorizationConfigured ? '' : 'LmdbEnedisRequiresAuthorizationConfiguration')),
+				'reason' => !$dolibarrOk ? 'LmdbEnedisRequiresDolibarr20' : (!$phpOk ? 'LmdbEnedisRequiresPhp80' : (!$curlOk ? 'LmdbEnedisRequiresCurl' : (!$productionEnvironment ? 'LmdbEnedisRequiresProductionEnvironment' : ($authorizationConfigured ? '' : 'LmdbEnedisRequiresAuthorizationConfiguration')))),
 			),
 			'measure_v1' => array(
 				'label' => 'LmdbEnedisFeatureMeasureV1',
